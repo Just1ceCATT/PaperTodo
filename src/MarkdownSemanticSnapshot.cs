@@ -76,6 +76,12 @@ internal readonly record struct MarkdownSemanticLink(
     public int End => Start + Length;
     public int LabelEnd => LabelStart + LabelLength;
     public int DestinationEnd => DestinationStart + DestinationLength;
+
+    /// <summary>
+    /// 链接 label 之外是否带有可见语法控制符（显式链接的 `[`/`](url)`、autolink 的两侧
+    /// `&lt;`/`&gt;`、HTML &lt;a&gt; 的开闭标签）。裸链（label 即全文）为 false：无语法可塌缩。
+    /// </summary>
+    public bool HasVisibleSyntax => Start < LabelStart || LabelEnd < End;
 }
 
 internal readonly record struct MarkdownSemanticLine(

@@ -8,8 +8,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 using Microsoft.Win32;
 using PaperTodo.Plugin;
 
@@ -176,9 +174,9 @@ public sealed partial class PaperWindow
         string? pendingImageId = null;
         var editorEntryGeneration = 0;
         var imageInteractionGeneration = 0;
-
-        // 按内容百分比把编辑器滚动位置同步到渲染面板,避免切换后被置顶。
-        // (已废弃: Full 渲染模式改用块渲染,编辑器始终可见,不再需要同步)
+        int previewSelectionStart = 0;
+        int previewSelectionLength = 0;
+        int previewSelectionSnapshotLength = -1; // -1 表示无有效快照
 
         bool IsCurrentPresenter()
         {
@@ -249,6 +247,14 @@ public sealed partial class PaperWindow
 
             var alreadyPreviewing = isPreviewing && box.IsPreviewMode;
             TraceNoteRender($"ShowPreview before isPreviewing={isPreviewing} boxPreview={box.IsPreviewMode} already={alreadyPreviewing}");
+            if (!alreadyPreviewing)
+            {
+                // 离开编辑态进预览前快照文本选区:预览态仍塌陷以保持视觉干净(不高亮),
+                // 点回正文且落点在快照范围内时恢复选区,避免“选中→失焦→点回”后选区被清空。
+                previewSelectionStart = box.SelectionStart;
+                previewSelectionLength = box.SelectionLength;
+                previewSelectionSnapshotLength = box.Text.Length;
+            }
             box.ClearImageSelection();
             box.SelectionLength = 0;
 
@@ -308,13 +314,11 @@ public sealed partial class PaperWindow
             TraceNoteRender($"ShowEditor after focus={focus} isPreviewing={isPreviewing} boxPreview={box.IsPreviewMode} focused={box.IsKeyboardFocusWithin}");
         }
 
-        // 块渲染模式不再需要独立的 fullRenderPanel;编辑器始终可见,
-        // MarkdownSemanticPresentation 完成所有块级装饰。
-
         void ShowEditorAtPreviewPoint(
             Point previewPoint,
             DependencyObject? originalSource = null,
-            bool selectImage = true)
+            bool selectImage = true,
+            bool fromMouseClick = true)
         {
             if (!IsCurrentPresenter())
             {
@@ -379,8 +383,25 @@ public sealed partial class PaperWindow
             else if (hasPreviewPosition)
             {
                 box.ClearImageSelection();
-                box.CaretIndex = Math.Clamp(caretIndex, 0, box.Text.Length);
-                box.SelectionLength = 0;
+                var targetOffset = Math.Clamp(caretIndex, 0, box.Text.Length);
+                var snapshotEnd = previewSelectionStart + previewSelectionLength;
+                var clickInSnapshotSelection =
+                    fromMouseClick &&
+                    previewSelectionLength > 0 &&
+                    previewSelectionSnapshotLength == box.Text.Length &&
+                    snapshotEnd <= box.Text.Length &&
+                    targetOffset >= previewSelectionStart &&
+                    targetOffset <= snapshotEnd;
+                if (clickInSnapshotSelection)
+                {
+                    // 点回正文且落点在上次选区内:恢复整段选区(caret 落选区末端),不再塌陷。
+                    box.Select(previewSelectionStart, previewSelectionLength);
+                }
+                else
+                {
+                    box.CaretIndex = targetOffset;
+                    box.SelectionLength = 0;
+                }
             }
             TraceNoteRender($"ShowEditorAtPreviewPoint after hasPosition={hasPreviewPosition} caret={box.CaretIndex}");
             var deferredWorkGeneration = _noteDeferredWorkGeneration;
@@ -549,7 +570,8 @@ public sealed partial class PaperWindow
                 ShowEditorAtPreviewPoint(
                     point,
                     e.OriginalSource as DependencyObject,
-                    selectImage: false);
+                    selectImage: false,
+                    fromMouseClick: false);
             }
             else if (!TryPlaceCaretOnImageForDrop(point, e.OriginalSource as DependencyObject) &&
                      box.TryGetCharacterIndexFromPoint(point, out var dropCaret))
@@ -725,7 +747,12 @@ public sealed partial class PaperWindow
                 {
                     OpenMarkdownLink(editUrl);
                     e.Handled = true;
+                    return;
                 }
+
+                // 普通文本点击交给 AvalonEdit 落光标。按下（隧道阶段，早于 AvalonEdit）先按当前布局
+                // 冻结控制符显灵，避免落点触发 reveal 重排后，同一点在手势内命中两处偏移而被误判为拖选。
+                box.BeginCaretRevealGesture();
                 return;
             }
 
@@ -736,6 +763,10 @@ public sealed partial class PaperWindow
                 return;
             }
 
+            // 点入编辑前先冻结：快照为按下瞬间的显灵值（预览态为 None），ShowEditorAtPreviewPoint
+            // 内 SetPreviewMode(false) 的重排、落光标触发的 reveal 事件均保持在冻结布局上，
+            // 松开后再由 up 收尾按最终光标显灵一次。
+            box.BeginCaretRevealGesture();
             ShowEditorAtPreviewPoint(point, originalSource);
             e.Handled = true;
         };
@@ -744,6 +775,9 @@ public sealed partial class PaperWindow
             UIElement.MouseLeftButtonUpEvent,
             new MouseButtonEventHandler((_, e) =>
             {
+                // 手势结束（bubble 阶段晚于 AvalonEdit 内部 TextArea 的 up 处理），恢复显灵跟随光标。
+                box.EndCaretRevealGesture();
+
                 if (!pendingImageReferenceOffset.HasValue ||
                     string.IsNullOrWhiteSpace(pendingImageId))
                 {
@@ -754,6 +788,19 @@ public sealed partial class PaperWindow
                     pendingImageReferenceOffset.Value,
                     pendingImageId);
                 e.Handled = true;
+            }),
+            true);
+
+        // 鼠标捕获真正释放且不会再有 Up 送达（拖出窗口/中途失活）时兜底结束手势；
+        // 捕获若被 AvalonEdit 转到其内部 TextArea（Mouse.Captured != null）则保持，交给 up 收尾。
+        box.AddHandler(
+            UIElement.LostMouseCaptureEvent,
+            new MouseEventHandler((_, _) =>
+            {
+                if (box.IsCaretRevealGestureActive && Mouse.Captured == null)
+                {
+                    box.EndCaretRevealGesture();
+                }
             }),
             true);
 

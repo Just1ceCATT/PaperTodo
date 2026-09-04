@@ -167,8 +167,69 @@ internal static class RevealChecks
         {
             True(MarkdownSemanticReveal.IsRangeKind(MarkdownSemanticSpanKind.Strong), "strong is range kind");
             True(MarkdownSemanticReveal.IsRangeKind(MarkdownSemanticSpanKind.InlineCode), "inline code is range kind");
+            True(MarkdownSemanticReveal.IsRangeKind(MarkdownSemanticSpanKind.HtmlContainer), "html container is a range kind");
             False(MarkdownSemanticReveal.IsRangeKind(MarkdownSemanticSpanKind.Heading), "heading is not a range kind");
             False(MarkdownSemanticReveal.IsRangeKind(MarkdownSemanticSpanKind.HtmlMarker), "html marker is not a range kind");
+        });
+
+        Check("HtmlContainer reveals as one whole pair", () =>
+        {
+            const string source = "x<b>1</b>y";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var container = SingleSpan(snapshot, MarkdownSemanticSpanKind.HtmlContainer);
+            var caretInContent = new MarkdownCaretReveal(
+                container.Start + (container.Length / 2),
+                LineForOffset(source, container.Start + (container.Length / 2)));
+            True(
+                MarkdownSemanticReveal.RevealRange(caretInContent, container.Start, container.End),
+                "caret in content reveals the opening and closing tags together");
+            var caretBefore = new MarkdownCaretReveal(
+                container.Start - 1, LineForOffset(source, container.Start - 1));
+            False(
+                MarkdownSemanticReveal.RevealRange(caretBefore, container.Start, container.End),
+                "caret before the pair keeps both tags hidden");
+            var caretAfter = new MarkdownCaretReveal(
+                container.End + 1, LineForOffset(source, container.End + 1));
+            False(
+                MarkdownSemanticReveal.RevealRange(caretAfter, container.Start, container.End),
+                "caret right after the pair keeps both tags hidden");
+        });
+
+        Check("HasRevealOnLine html pair is container-scoped", () =>
+        {
+            const string source = "a <b>1</b> z";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var container = SingleSpan(snapshot, MarkdownSemanticSpanKind.HtmlContainer);
+            var caretInContent = new MarkdownCaretReveal(
+                container.Start + 3, 0);
+            True(
+                MarkdownSemanticReveal.HasRevealOnLine(
+                    snapshot, source, 0, 0, caretInContent),
+                "caret in html content reveals a control marker on the row");
+            var caretInTail = new MarkdownCaretReveal(
+                source.IndexOf('z'), 0);
+            False(
+                MarkdownSemanticReveal.HasRevealOnLine(
+                    snapshot, source, 0, 0, caretInTail),
+                "caret in right neighbor text must not count html markers");
+        });
+
+        Check("HasRevealOnLine angle autolink counts its brackets", () =>
+        {
+            const string source = "a <https://example.com> z";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var link = snapshot.Links.Single();
+            True(link.IsAuto && link.HasVisibleSyntax, "angle autolink keeps visible syntax");
+            var caretInUrl = new MarkdownCaretReveal(link.Start + 5, 0);
+            True(
+                MarkdownSemanticReveal.HasRevealOnLine(
+                    snapshot, source, 0, 0, caretInUrl),
+                "caret inside the URL reveals the < > brackets");
+            var caretInTail = new MarkdownCaretReveal(source.IndexOf('z'), 0);
+            False(
+                MarkdownSemanticReveal.HasRevealOnLine(
+                    snapshot, source, 0, 0, caretInTail),
+                "caret in right neighbor text must not count autolink brackets");
         });
 
         Check("Caret line computed across CR-only source", () =>

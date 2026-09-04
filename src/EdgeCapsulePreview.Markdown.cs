@@ -313,12 +313,6 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         }
     }
 
-    // 按视觉尺寸系数与外层注入的缩放系数一起计算字号,与 MarkdownTextBox 的 ScaledFontSize 保持一致
-    private static double Scaled(double baseSize, double zoom)
-    {
-        return AppTypography.Scale(baseSize) * zoom;
-    }
-
     private static void AddEmptyState(Panel target)
     {
         var empty = NewTextBlock("—", AppTypography.Scale(16));
@@ -504,28 +498,13 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         InlineCollection target,
         string text,
         Action<string> openExternal)
-        => AddInlineContent(target, text, openExternal, depth: 0, zoom: 1.0);
-
-    private static void AddInlineContent(
-        InlineCollection target,
-        string text,
-        Action<string> openExternal,
-        double zoom)
-        => AddInlineContent(target, text, openExternal, depth: 0, zoom: zoom);
+        => AddInlineContent(target, text, openExternal, depth: 0);
 
     private static void AddInlineContent(
         InlineCollection target,
         string text,
         Action<string> openExternal,
         int depth)
-        => AddInlineContent(target, text, openExternal, depth, zoom: 1.0);
-
-    private static void AddInlineContent(
-        InlineCollection target,
-        string text,
-        Action<string> openExternal,
-        int depth,
-        double zoom)
     {
         if (depth >= MaximumInlineDepth)
         {
@@ -557,7 +536,7 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
             }
             else if (match.Groups[3].Success)
             {
-                target.Add(CreateLink(Group(3), Group(4), openExternal, depth, zoom));
+                target.Add(CreateLink(Group(3), Group(4), openExternal, depth));
             }
             else if (match.Groups[5].Success || match.Groups[6].Success)
             {
@@ -567,28 +546,30 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
                     FontWeight = FontWeights.Bold,
                     FontStyle = FontStyles.Italic
                 };
-                AddInlineContent(span.Inlines, Group(group), openExternal, depth + 1, zoom);
+                AddInlineContent(span.Inlines, Group(group), openExternal, depth + 1);
                 target.Add(span);
             }
             else if (match.Groups[7].Success || match.Groups[8].Success)
             {
                 var group = match.Groups[7].Success ? 7 : 8;
                 var bold = new Bold();
-                AddInlineContent(bold.Inlines, Group(group), openExternal, depth + 1, zoom);
+                AddInlineContent(bold.Inlines, Group(group), openExternal, depth + 1);
                 target.Add(bold);
             }
             else if (match.Groups[9].Success)
             {
                 var strike = new Span { TextDecorations = TextDecorations.Strikethrough };
-                AddInlineContent(strike.Inlines, Group(9), openExternal, depth + 1, zoom);
+                AddInlineContent(strike.Inlines, Group(9), openExternal, depth + 1);
                 target.Add(strike);
             }
             else if (match.Groups[10].Success)
             {
+                // CodeFontSize 已含全局缩放,直接用作字号:与下方代码块(BuildCodeBlock)及编辑器
+                // "行内代码与代码块同字号"约定一致。切勿再套 AppTypography.Scale,否则会二次缩放。
                 var code = new Span(new Run(Group(10)))
                 {
                     FontFamily = new FontFamily("Cascadia Mono, Consolas"),
-                    FontSize = Scaled(NoteTypography.CodeFontSize, zoom)
+                    FontSize = NoteTypography.CodeFontSize
                 };
                 code.SetResourceReference(TextElement.BackgroundProperty, "HoverBrushKey");
                 target.Add(code);
@@ -597,7 +578,7 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
             {
                 var group = match.Groups[11].Success ? 11 : 12;
                 var italic = new Italic();
-                AddInlineContent(italic.Inlines, Group(group), openExternal, depth + 1, zoom);
+                AddInlineContent(italic.Inlines, Group(group), openExternal, depth + 1);
                 target.Add(italic);
             }
 
@@ -614,15 +595,14 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         string label,
         string value,
         Action<string> openExternal,
-        int depth,
-        double zoom)
+        int depth)
     {
         var normalizedValue = MarkdownInlineSyntax.Unescape(value);
         if (!Uri.TryCreate(normalizedValue, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("http" or "https" or "mailto"))
         {
             var fallback = new Span();
-            AddInlineContent(fallback.Inlines, label, openExternal, depth + 1, zoom);
+            AddInlineContent(fallback.Inlines, label, openExternal, depth + 1);
             return fallback;
         }
 
@@ -631,7 +611,7 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
             NavigateUri = uri,
             Cursor = Cursors.Hand
         };
-        AddInlineContent(link.Inlines, label, openExternal, depth + 1, zoom);
+        AddInlineContent(link.Inlines, label, openExternal, depth + 1);
         link.SetResourceReference(TextElement.ForegroundProperty, "LinkBrushKey");
         EdgeCapsulePreviewInteraction.SetConsumesPointer(link, true);
         link.RequestNavigate += (_, e) =>

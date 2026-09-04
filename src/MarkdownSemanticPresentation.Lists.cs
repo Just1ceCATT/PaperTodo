@@ -158,19 +158,18 @@ internal sealed partial class MarkdownSemanticPresentation
                      line != null && line.LineNumber <= visualLine.LastDocumentLine.LineNumber;
                      line = line.NextLine)
                 {
-                    if (HasTaskMarkerOnLine(snapshot, line))
+                    var isTaskLine = HasTaskMarkerOnLine(snapshot, line);
+                    // Enhanced/Off 档或已显灵的任务行:源码即所见,整行跳过图形补画。
+                    if (isTaskLine && (!_owner.IsFullMode || IsTaskRevealed(snapshot, line)))
                     {
-                        // Full 档：任务行按活动块显灵源码，否则以勾选框呈现。
-                        if (_owner.IsFullMode)
-                        {
-                            if (IsTaskRevealed(snapshot, line))
-                            {
-                                continue;
-                            }
-
-                            DrawTaskCheckBox(textView, drawingContext, line);
-                        }
                         continue;
+                    }
+
+                    // Full 档未显灵任务行画勾选框;无序 bullet 由勾选框顶替,有序序号
+                    // 仍由下方 marker 循环补画(普通行此处无事可做)。
+                    if (isTaskLine)
+                    {
+                        DrawTaskCheckBox(textView, drawingContext, line);
                     }
 
                     foreach (var marker in snapshot.SpansForLine(Math.Max(0, line.LineNumber - 1)))
@@ -180,6 +179,14 @@ internal sealed partial class MarkdownSemanticPresentation
                                 MarkdownSemanticSpanKind.OrderedListMarker) ||
                             marker.End <= line.Offset ||
                             marker.Start >= line.EndOffset)
+                        {
+                            continue;
+                        }
+
+                        // 任务行:勾选框已顶替无序 bullet,避免重叠重复绘制;有序序号与
+                        // 勾选框不重叠,照常由下方 DrawMarker 补画。
+                        if (isTaskLine &&
+                            marker.Kind == MarkdownSemanticSpanKind.UnorderedListMarker)
                         {
                             continue;
                         }
@@ -262,7 +269,8 @@ internal sealed partial class MarkdownSemanticPresentation
             var cellLeft = Math.Min(topLeft.X, bottomRight.X);
             var cellRight = Math.Max(topLeft.X, bottomRight.X);
             var height = Math.Max(1, bottomRight.Y - topLeft.Y);
-            var boxSize = Math.Min(Math.Max(8, height * 0.7), cellRight - cellLeft);
+            // 框体高度取自缩放后的字形高度：去掉固定 8px 地板，缩小缩放时可随之变小。
+            var boxSize = Math.Max(1, Math.Min(height * 0.7, cellRight - cellLeft));
             var rect = new Rect(
                 cellLeft + (cellRight - cellLeft - boxSize) / 2,
                 topLeft.Y + (height - boxSize) / 2,
@@ -270,11 +278,13 @@ internal sealed partial class MarkdownSemanticPresentation
                 boxSize);
 
             drawingContext.DrawRectangle(Theme.PaperBrush, null, rect);
-            var pen = new Pen(Theme.PaperBorderBrush, 1);
+            // 描边随框体等比加粗（zoom=1 时 ≈1px），避免放大后仍是细边框。
+            var penWidth = Math.Max(1.0, boxSize * 0.09);
+            var pen = new Pen(Theme.PaperBorderBrush, penWidth);
             if (task.Checked)
             {
                 drawingContext.DrawRectangle(Theme.ActiveBrush, null, rect);
-                var checkPen = new Pen(Theme.PaperBrush, Math.Max(1.2, boxSize * 0.14));
+                var checkPen = new Pen(Theme.PaperBrush, Math.Max(penWidth, boxSize * 0.14));
                 drawingContext.DrawLine(
                     checkPen,
                     new Point(rect.Left + boxSize * 0.22, rect.Top + boxSize * 0.5),
@@ -286,7 +296,15 @@ internal sealed partial class MarkdownSemanticPresentation
             }
             else
             {
-                drawingContext.DrawRectangle(null, pen, new Rect(rect.Left + 0.5, rect.Top + 0.5, rect.Width - 1, rect.Height - 1));
+                var inset = penWidth / 2;
+                drawingContext.DrawRectangle(
+                    null,
+                    pen,
+                    new Rect(
+                        rect.Left + inset,
+                        rect.Top + inset,
+                        Math.Max(0, rect.Width - penWidth),
+                        Math.Max(0, rect.Height - penWidth)));
             }
         }
 
@@ -335,9 +353,10 @@ internal sealed partial class MarkdownSemanticPresentation
 
             if (marker.Kind == MarkdownSemanticSpanKind.UnorderedListMarker)
             {
+                // 半径随字号等比（zoom=1 时 ≈2.2px）：去掉固定 [2.0,3.2] 硬钳以跟随缩放。
                 var radius = Math.Max(
-                    2.0,
-                    Math.Min(3.2, _owner.ScaledFontSize(NoteTypography.FontSize) * 0.16));
+                    0.5,
+                    _owner.ScaledFontSize(NoteTypography.FontSize) * 0.16);
                 drawingContext.DrawEllipse(
                     Theme.TextBrush,
                     null,

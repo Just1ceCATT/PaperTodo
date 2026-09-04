@@ -85,6 +85,88 @@ internal static class CollapseLayoutChecks
                 True(runs[i].Start >= runs[i - 1].End, "collapse runs must be sorted & non-overlapping");
             }
         });
+
+        Check("Angle autolink brackets collapse outside caret", () =>
+        {
+            const string source = "<https://example.com>";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, MarkdownCaretReveal.None);
+            // label 两侧的 < 与 > 各自塌缩成一格，URL 文字保留。
+            EqualRuns(source, "(0,1);(20,21)", runs);
+        });
+
+        Check("Angle autolink reveals both brackets while caret inside URL", () =>
+        {
+            const string source = "<https://example.com>";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var link = snapshot.Links.Single();
+            True(link.HasVisibleSyntax, "autolink keeps its leading '<' as visible syntax");
+            var caret = new MarkdownCaretReveal(link.Start + 5, 0);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, caret);
+            Equal(0, runs.Count, "autolink brackets not collapsed while editing the URL");
+        });
+
+        Check("Bare link never collapses", () =>
+        {
+            const string source = "see https://example.com now";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, MarkdownCaretReveal.None);
+            Equal(0, runs.Count, "bare link has no visible syntax to collapse");
+        });
+
+        Check("HTML pair tags collapse outside caret", () =>
+        {
+            const string source = "<b>1</b>";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, MarkdownCaretReveal.None);
+            EqualRuns(source, "(0,3);(4,8)", runs);
+        });
+
+        Check("HTML pair reveals both tags while caret inside content", () =>
+        {
+            const string source = "x<b>1</b>y";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var container = snapshot.Spans.Single(s => s.Kind == MarkdownSemanticSpanKind.HtmlContainer);
+            var mid = container.Start + (container.Length / 2);
+            var caret = new MarkdownCaretReveal(mid, 0);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, caret);
+            Equal(0, runs.Count, "caret inside content keeps <b> and </b> both visible");
+        });
+
+        Check("HTML pair collapses whole pair when caret sits right after it", () =>
+        {
+            const string source = "a<b>1</b>z";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var container = snapshot.Spans.Single(s => s.Kind == MarkdownSemanticSpanKind.HtmlContainer);
+            var opener = snapshot.Spans.Single(s =>
+                s.Kind == MarkdownSemanticSpanKind.HtmlMarker && s.Start == container.Start);
+            var closer = snapshot.Spans.Single(s =>
+                s.Kind == MarkdownSemanticSpanKind.HtmlMarker && s.End == container.End);
+            var caret = new MarkdownCaretReveal(container.End + 1, 0);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, caret);
+            EqualRuns(source, $"({opener.Start},{opener.End});({closer.Start},{closer.End})", runs);
+        });
+
+        Check("HTML anchor link collapses its two tags once", () =>
+        {
+            const string source = "<a href=\"https://example.com/a\">label</a>";
+            var snapshot = MarkdownSemanticSnapshot.Parse(source);
+            var container = snapshot.Spans.Single(s => s.Kind == MarkdownSemanticSpanKind.HtmlContainer);
+            var opener = snapshot.Spans.Single(s =>
+                s.Kind == MarkdownSemanticSpanKind.HtmlMarker && s.Start == container.Start);
+            var closer = snapshot.Spans.Single(s =>
+                s.Kind == MarkdownSemanticSpanKind.HtmlMarker && s.End == container.End);
+            var runs = MarkdownSemanticCollapseLayout.ComputeCollapsedRuns(
+                snapshot, source, MarkdownCaretReveal.None);
+            Equal(2, runs.Count, "anchor collapses exactly its opening and closing tags");
+            EqualRuns(source, $"({opener.Start},{opener.End});({closer.Start},{closer.End})", runs);
+        });
     }
 
     private static void EqualRuns(

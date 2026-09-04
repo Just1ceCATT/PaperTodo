@@ -13,7 +13,8 @@ internal sealed partial class MarkdownSemanticPresentation
             DocumentLine line,
             MarkdownSemanticSnapshot snapshot)
         {
-            foreach (var span in snapshot.SpansForLine(Math.Max(0, line.LineNumber - 1)))
+            var lineSpans = snapshot.SpansForLine(Math.Max(0, line.LineNumber - 1));
+            foreach (var span in lineSpans)
             {
                 if (span.End <= line.Offset || span.Start >= line.EndOffset)
                 {
@@ -24,11 +25,7 @@ internal sealed partial class MarkdownSemanticPresentation
                 {
                     case MarkdownSemanticSpanKind.HtmlMarker:
                         var markerBrush = _owner.ControlBrush(
-                            _owner.IsRevealed(
-                                line.LineNumber,
-                                span.Start,
-                                span.Length,
-                                MarkdownSemanticSpanKind.HtmlMarker));
+                            HtmlMarkerRevealed(line, span, lineSpans));
                         ApplyAbsolute(line, span.Start, span.End, element =>
                         {
                             element.TextRunProperties.SetTypeface(NormalTypeface);
@@ -94,6 +91,32 @@ internal sealed partial class MarkdownSemanticPresentation
                         break;
                 }
             }
+        }
+
+        /// <summary>
+        /// HtmlMarker 是否显灵：按所属 HtmlContainer 的成对区间判定（与塌缩一致——开/闭标签整对显隐，
+        /// 不按“光标是否越过单枚标签起点”）。
+        /// </summary>
+        private bool HtmlMarkerRevealed(
+            DocumentLine line,
+            MarkdownSemanticSpan marker,
+            ReadOnlySpan<MarkdownSemanticSpan> lineSpans)
+        {
+            foreach (var candidate in lineSpans)
+            {
+                if (candidate.Kind == MarkdownSemanticSpanKind.HtmlContainer &&
+                    (candidate.Start == marker.Start || candidate.End == marker.End))
+                {
+                    return _owner.IsRangeRevealed(candidate.Start, candidate.End);
+                }
+            }
+
+            // 防御：找不到 container（理论上不发生）时回退原行边界显灵判定，避免退化成不可见。
+            return _owner.IsRevealed(
+                line.LineNumber,
+                marker.Start,
+                marker.Length,
+                MarkdownSemanticSpanKind.HtmlMarker);
         }
 
         private void ApplyEscapeSemantics(

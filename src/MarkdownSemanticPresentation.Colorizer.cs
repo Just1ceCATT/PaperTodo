@@ -180,10 +180,10 @@ internal sealed partial class MarkdownSemanticPresentation
                     continue;
                 }
 
-                if (!link.IsAuto)
+                if (link.HasVisibleSyntax)
                 {
-                    // Color only syntax around the label. Painting the whole source span first would
-                    // incorrectly recolor the label in edit mode (and inside quote styling).
+                    // 涂 label 两侧的语法段（不重涂 label）：显式链接的 `[`/`](url)`、带尖括号
+                    // autolink 的 `<`/`>`、HTML <a> 的开/闭标签。裸链无语法段，跳过。
                     ApplyAbsolute(
                         line,
                         link.Start,

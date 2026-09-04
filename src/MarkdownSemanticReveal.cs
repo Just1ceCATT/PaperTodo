@@ -16,10 +16,10 @@ internal readonly record struct MarkdownCaretReveal(int CaretOffset, int CaretLi
 /// MarkdownSemanticChecks 直接链接测试。
 ///
 /// 采用两级规则，避免为 reveal 建立第二份块区间注解：
-/// - 行内成对范围（强调/加粗/删除线/行内代码）：控制符随 span 显隐——只要光标落在该
-///   span 的 [Start, End) 内就显示其两端分隔符，便于直接编辑。
+/// - 行内成对范围（强调/加粗/删除线/行内代码、HTML 开闭标签对）：控制符随 span/container 显隐——
+///   只要光标落在该区间内就成对显示两端分隔符/标签，便于直接编辑。
 /// - 行边界单元（标题 atx 开/闭 #、引用 &gt;、列表 -/1.、任务 [ ]、围栏行、setext、
-///   分隔线、HTML 标签、转义反斜杠）：仅当光标与该单元同处一行且光标位于该单元起点
+///   分隔线、转义反斜杠）：仅当光标与该单元同处一行且光标位于该单元起点
 ///   之后（进入单元即显灵）才显示。围栏内容行与围栏行不在同一行，因此编辑代码内容时
 ///   围栏天然保持隐藏。
 /// </summary>
@@ -67,10 +67,13 @@ internal static class MarkdownSemanticReveal
     /// <summary>两端带分隔符、需整段显隐的行内 span 种类。</summary>
     public static bool IsRangeKind(MarkdownSemanticSpanKind kind)
     {
+        // HtmlContainer：HTML 对（<b>…</b>/<a>…</a> 等）按成对区间整段显隐——与行内成对
+        // markdown 一致；两枚 HtmlMarker 是否显灵统一由所属 container 区间判定，不再单格判定。
         return kind is MarkdownSemanticSpanKind.Emphasis or
             MarkdownSemanticSpanKind.Strong or
             MarkdownSemanticSpanKind.Strikethrough or
-            MarkdownSemanticSpanKind.InlineCode;
+            MarkdownSemanticSpanKind.InlineCode or
+            MarkdownSemanticSpanKind.HtmlContainer;
     }
 
     /// <summary>
@@ -108,6 +111,8 @@ internal static class MarkdownSemanticReveal
                 continue;
             }
 
+            // HTML 标签（HtmlMarker）不进“行边界单格”清单：其显灵由所属 HtmlContainer 的成对区间
+            // 判定（上方 IsRangeKind 分支），避免光标停在容器右邻文本同行时被误判为“有显灵”。
             if ((span.Kind is MarkdownSemanticSpanKind.Heading or
                     MarkdownSemanticSpanKind.FencedCodeOpening or
                     MarkdownSemanticSpanKind.FencedCodeClosing or
@@ -116,7 +121,6 @@ internal static class MarkdownSemanticReveal
                     MarkdownSemanticSpanKind.UnorderedListMarker or
                     MarkdownSemanticSpanKind.OrderedListMarker or
                     MarkdownSemanticSpanKind.TaskListMarker or
-                    MarkdownSemanticSpanKind.HtmlMarker or
                     MarkdownSemanticSpanKind.EscapeMarker) &&
                 RevealMarker(caret, lineZeroBased, span.Start, span.Length, span.Kind))
             {
@@ -124,9 +128,11 @@ internal static class MarkdownSemanticReveal
             }
         }
 
+        // 只计“带可见语法的链接”（显式 [label](url)、带 <> 的 autolink、<a> anchor）：
+        // 裸链无控制符、永不显灵，不参与淡入上升沿判定。
         foreach (var link in snapshot.LinksForLine(lineZeroBased))
         {
-            if (!link.IsAuto && RevealRange(caret, link.Start, link.End))
+            if (link.HasVisibleSyntax && RevealRange(caret, link.Start, link.End))
             {
                 return true;
             }
