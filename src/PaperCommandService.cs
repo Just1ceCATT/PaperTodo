@@ -178,7 +178,10 @@ internal sealed class PaperCommandService
             RequiredId(request.PaperId, "paperId"),
             PaperTypes.Todo);
         var inputs = request.Todos?.ToArray() ?? [];
-        ValidateTodoInputs(inputs, allowEmpty: false);
+        ValidateTodoInputs(
+            inputs,
+            allowEmpty: false,
+            sourcePaperId: paper.Id);
 
         var snapshot = TodoPaperSnapshot.Capture(paper);
         var addedIds = new List<string>(inputs.Length);
@@ -666,7 +669,8 @@ internal sealed class PaperCommandService
 
     private void ValidateTodoInputs(
         IReadOnlyList<TodoCreateItem> inputs,
-        bool allowEmpty)
+        bool allowEmpty,
+        string? sourcePaperId = null)
     {
         if (!allowEmpty && inputs.Count == 0)
         {
@@ -693,7 +697,7 @@ internal sealed class PaperCommandService
                     "A completed todo cannot start with a reminder.");
             }
             ValidateReminder(input.ReminderAt);
-            _ = NormalizeLinkedPaper(input.LinkedPaperId);
+            _ = NormalizeLinkedPaper(input.LinkedPaperId, sourcePaperId);
         }
     }
 
