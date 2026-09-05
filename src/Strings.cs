@@ -65,7 +65,12 @@ public static class Strings
             ["TodoReminderSoundBeep"] = ["蜂鸣", "Beep", "ビープ", "비프"],
             ["TodoReminderSoundExclamation"] = ["感叹", "Exclamation", "警告", "경고"],
             ["TodoReminderSoundHand"] = ["严重警告", "Critical stop", "重大な警告", "심각한 경고"],
-            ["TodoReminderSoundQuestion"] = ["询问", "Question", "質問", "질문"]
+            ["TodoReminderSoundQuestion"] = ["询问", "Question", "質問", "질문"],
+            ["TodoPasteTruncatedTitle"] = ["粘贴内容已截断", "Paste was truncated", "貼り付け内容を切り詰めました", "붙여넣기 내용이 잘렸습니다"],
+            ["TodoPasteItemLimitMessage"] = ["本次最多插入前 {0} 条待办，其余未插入。", "Only the first {0} todos were inserted; the rest were not inserted.", "先頭の {0} 件だけを挿入し、残りは挿入しませんでした。", "앞의 {0}개 할 일만 삽입했고 나머지는 삽입하지 않았습니다."],
+            ["TodoPasteTextLimitMessage"] = ["待办最多支持 {0} 个字符，超出部分未插入。", "A todo can contain at most {0} characters; excess text was not inserted.", "ToDo は最大 {0} 文字です。超えた部分は挿入しませんでした。", "할 일은 최대 {0}자까지 지원하며 초과한 텍스트는 삽입하지 않았습니다."],
+            ["NoteInputLimitTitle"] = ["笔记已达上限", "Note limit reached", "ノートの上限に達しました", "메모 한도에 도달했습니다"],
+            ["NoteInputLimitMessage"] = ["笔记最多支持 {0} 个字符。请删除部分内容后再继续输入。", "A note can contain at most {0} characters. Delete some content before typing more.", "ノートは最大 {0} 文字です。続けて入力するには一部の内容を削除してください。", "메모는 최대 {0}자까지 입력할 수 있습니다. 계속 입력하려면 일부 내용을 삭제해 주세요."]
         };
 
     public static string Get(string key)
