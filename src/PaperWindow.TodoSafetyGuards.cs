@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -7,17 +6,13 @@ namespace PaperTodo;
 
 public sealed partial class PaperWindow
 {
-    private sealed class NoteLimitNoticeState
-    {
-        public bool Shown { get; set; }
-    }
+    private readonly record struct TodoPasteLimitNotice(
+        bool TooManyItems,
+        bool TextTruncated);
 
-    private static readonly ConditionalWeakTable<MarkdownTextBox, NoteLimitNoticeState>
-        NoteLimitNoticeStates = new();
-
-    // Register before any PaperWindow instance is constructed. Class handlers run before the
-    // instance PreviewKeyDown / paste handlers, so the lock can stop mutations at the window
-    // boundary and input-limit notices can be queued without changing the existing edit paths.
+    // Register before any PaperWindow instance is constructed. The window-level lock handler
+    // mirrors the lock shield's "consume all keyboard interaction" contract, while the Todo
+    // paste preflight only scans enough input to determine whether user-visible truncation occurs.
     private static readonly bool TodoSafetyGuardsRegistered = RegisterTodoSafetyGuards();
 
     private static bool RegisterTodoSafetyGuards()
@@ -25,35 +20,24 @@ public sealed partial class PaperWindow
         EventManager.RegisterClassHandler(
             typeof(PaperWindow),
             UIElement.PreviewKeyDownEvent,
-            new KeyEventHandler(OnTodoSafetyPreviewKeyDown),
+            new KeyEventHandler(OnInteractionLockPreviewKeyDown),
             handledEventsToo: true);
         EventManager.RegisterClassHandler(
             typeof(TodoTextBox),
             DataObject.PastingEvent,
             new DataObjectPastingEventHandler(OnTodoSafetyPasting),
             handledEventsToo: true);
-        EventManager.RegisterClassHandler(
-            typeof(MarkdownTextBox),
-            UIElement.PreviewTextInputEvent,
-            new TextCompositionEventHandler(OnNoteSafetyPreviewTextInput),
-            handledEventsToo: true);
         return true;
     }
 
-    private static void OnTodoSafetyPreviewKeyDown(object sender, KeyEventArgs e)
+    private static void OnInteractionLockPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (sender is not PaperWindow window ||
-            window._paper.Type != PaperTypes.Todo ||
-            !window._advancedInteractionLocked ||
-            Keyboard.Modifiers != ModifierKeys.Control ||
-            e.Key is not (Key.Z or Key.Y))
+        if (sender is PaperWindow { _advancedInteractionLocked: true })
         {
-            return;
+            // The lock shield already consumes all child keyboard input. Window-level handlers
+            // tunnel before the shield, so consume the same input here before Escape/Undo/etc.
+            e.Handled = true;
         }
-
-        // PaperWindow's Todo undo/redo handler is window-level and would otherwise run before
-        // the focused lock shield gets a chance to consume the key.
-        e.Handled = true;
     }
 
     private static void OnTodoSafetyPasting(object sender, DataObjectPastingEventArgs e)
@@ -84,63 +68,122 @@ public sealed partial class PaperWindow
             return;
         }
 
-        var meaningfulLineCount = raw
-            .Replace("\r\n", "\n")
-            .Replace('\r', '\n')
-            .Split('\n')
-            .Select(CleanPastedTodoLine)
-            .Count(line => !string.IsNullOrWhiteSpace(line));
-        if (meaningfulLineCount <= MaxPastedTodoLines)
+        var notice = AnalyzeTodoPasteLimits(raw, editor);
+        if (!notice.TooManyItems && !notice.TextTruncated)
         {
             return;
         }
 
-        var omittedCount = meaningfulLineCount - MaxPastedTodoLines;
         _ = window.Dispatcher.BeginInvoke(
-            (Action)(() => PaperNoticeDialog.Show(
-                window,
-                InputLimitNoticeStrings.TodoPasteTruncatedTitle,
-                InputLimitNoticeStrings.TodoPasteTruncatedMessage(
-                    MaxPastedTodoLines,
-                    omittedCount))),
+            (Action)(() =>
+            {
+                var messages = new List<string>(2);
+                if (notice.TooManyItems)
+                {
+                    messages.Add(Strings.Format(
+                        "TodoPasteItemLimitMessage",
+                        MaxPastedTodoLines));
+                }
+                if (notice.TextTruncated)
+                {
+                    messages.Add(Strings.Format(
+                        "TodoPasteTextLimitMessage",
+                        TodoTextMaxLength));
+                }
+
+                PaperNoticeDialog.Show(
+                    window,
+                    Strings.Get("TodoPasteTruncatedTitle"),
+                    string.Join(Environment.NewLine, messages));
+            }),
             DispatcherPriority.Background);
     }
 
-    private static void OnNoteSafetyPreviewTextInput(
-        object sender,
-        TextCompositionEventArgs e)
+    private static TodoPasteLimitNotice AnalyzeTodoPasteLimits(
+        string raw,
+        TodoTextBox editor)
     {
-        if (sender is not MarkdownTextBox editor ||
-            editor.IsReadOnly ||
-            editor.MaxLength <= 0 ||
-            string.IsNullOrEmpty(e.Text) ||
-            Window.GetWindow(editor) is not PaperWindow window ||
-            window._paper.Type != PaperTypes.Note)
+        var meaningfulCount = 0;
+        var tooManyItems = false;
+        var textTruncated = false;
+        string? firstInsertedLine = null;
+        string? lastInsertedLine = null;
+
+        foreach (var rawLine in EnumerateTodoClipboardLines(raw))
         {
-            return;
+            var cleaned = CleanPastedTodoLine(rawLine);
+            if (string.IsNullOrWhiteSpace(cleaned))
+            {
+                continue;
+            }
+
+            meaningfulCount++;
+            if (meaningfulCount > MaxPastedTodoLines)
+            {
+                tooManyItems = true;
+                break;
+            }
+
+            firstInsertedLine ??= cleaned;
+            lastInsertedLine = cleaned;
+            if (cleaned.Length > TodoTextMaxLength)
+            {
+                textTruncated = true;
+            }
         }
 
-        var state = NoteLimitNoticeStates.GetOrCreateValue(editor);
-        var currentLength = editor.Document?.TextLength ?? editor.Text.Length;
-        if (currentLength < editor.MaxLength)
+        var originalText = editor.Text ?? "";
+        var selectionStart = Math.Clamp(editor.SelectionStart, 0, originalText.Length);
+        var selectionLength = Math.Clamp(
+            editor.SelectionLength,
+            0,
+            originalText.Length - selectionStart);
+
+        if (meaningfulCount <= 1)
         {
-            state.Shown = false;
+            // HandleTodoPaste leaves a single logical line to the native TextBox paste path.
+            // Warn when MaxLength will keep part of the incoming text out of the editor.
+            var projectedLength =
+                (long)originalText.Length - selectionLength + raw.Length;
+            textTruncated |= projectedLength > TodoTextMaxLength;
+            return new TodoPasteLimitNotice(tooManyItems, textTruncated);
         }
 
-        var selectedLength = Math.Clamp(editor.SelectionLength, 0, currentLength);
-        var projectedLength = currentLength - selectedLength + e.Text.Length;
-        if (projectedLength <= editor.MaxLength || state.Shown)
+        if (firstInsertedLine != null && lastInsertedLine != null)
         {
-            return;
+            var prefixLength = selectionStart;
+            var suffixLength = originalText.Length - (selectionStart + selectionLength);
+            var firstLength = Math.Min(firstInsertedLine.Length, TodoTextMaxLength);
+            var lastLength = Math.Min(lastInsertedLine.Length, TodoTextMaxLength);
+            textTruncated |=
+                (long)prefixLength + firstLength > TodoTextMaxLength ||
+                (long)lastLength + suffixLength > TodoTextMaxLength;
         }
 
-        state.Shown = true;
-        _ = window.Dispatcher.BeginInvoke(
-            (Action)(() => PaperNoticeDialog.Show(
-                window,
-                InputLimitNoticeStrings.NoteLimitTitle,
-                InputLimitNoticeStrings.NoteLimitMessage(editor.MaxLength))),
-            DispatcherPriority.Background);
+        return new TodoPasteLimitNotice(tooManyItems, textTruncated);
+    }
+
+    private static IEnumerable<string> EnumerateTodoClipboardLines(string raw)
+    {
+        var start = 0;
+        for (var index = 0; index < raw.Length; index++)
+        {
+            if (raw[index] is not ('\r' or '\n'))
+            {
+                continue;
+            }
+
+            yield return raw[start..index];
+            if (raw[index] == '\r' &&
+                index + 1 < raw.Length &&
+                raw[index + 1] == '\n')
+            {
+                index++;
+            }
+            start = index + 1;
+        }
+
+        yield return raw[start..];
     }
 
     internal void PreserveTriggeredTodoReminderInHistory(
