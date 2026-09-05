@@ -205,9 +205,14 @@ public sealed partial class AppController
         // sound must never keep a successfully surfaced reminder pending.
         PlayTodoReminderSound();
 
-        foreach (var (_, item) in due)
+        foreach (var (paper, item) in due)
         {
             item.ReminderTriggered = true;
+            if (item.ReminderAt is { } reminderAt &&
+                _windows.TryGetValue(paper.Id, out var window))
+            {
+                window.PreserveTriggeredTodoReminderInHistory(item.Id, reminderAt);
+            }
         }
 
         foreach (var paperGroup in due.GroupBy(
