@@ -324,8 +324,18 @@ public sealed partial class PaperWindow : Window
     private const string PinNeedlePathData = "M 10.85,15.35 H 13.15 V 22.1 L 12,23.25 L 10.85,22.1 Z";
     private const int TodoMoveAnimationMilliseconds = 150;
 
-    private static readonly ControlTemplate SharedContextMenuTemplate = BuildContextMenuTemplate();
-    private static readonly Style SharedCompactMenuItemStyle = BuildCompactMenuItemStyle();
+    // Static helpers can initialize PaperWindow on a worker thread during startup.
+    // Keep dispatcher-owned menu resources lazy and shared only by their creating thread.
+    // ThreadStatic fields must not have initializers: each UI thread fills its own cache.
+    [ThreadStatic]
+    private static ControlTemplate? _sharedContextMenuTemplate;
+    [ThreadStatic]
+    private static Style? _sharedCompactMenuItemStyle;
+
+    private static ControlTemplate SharedContextMenuTemplate =>
+        _sharedContextMenuTemplate ??= BuildContextMenuTemplate();
+    private static Style SharedCompactMenuItemStyle =>
+        _sharedCompactMenuItemStyle ??= BuildCompactMenuItemStyle();
     private Style? _todoCheckBoxStyle;
     private double _todoCheckBoxStyleScale = double.NaN;
 
