@@ -10,8 +10,8 @@ internal static partial class Program
 {
     private static readonly (string Name, Action Run)[] Checks =
     [
-        ("paper-menu-worker-first", () => CheckResources(typeof(PaperWindow), PaperResources)),
-        ("tray-menu-worker-first", () => CheckResources(typeof(AppController), TrayResources)),
+        ("paper-menu-worker-first", CheckPaperResources),
+        ("tray-menu-worker-first", CheckTrayResources),
         ("menu-caches-two-sta-threads", CheckSeparateUiThreads),
         ("shared-easings-worker-first", CheckFrozenEasings),
         ("menu-scale-refresh", CheckMenuScaleRefresh),
@@ -21,6 +21,12 @@ internal static partial class Program
         ("single-instance-timeout-keeps-listening", CheckSingleInstanceTimeout),
         ("single-instance-cancel-pending-read", CheckSingleInstanceCancellation)
     ];
+
+    private static void CheckPaperResources() =>
+        CheckResources(typeof(PaperWindow), PaperResources);
+
+    private static void CheckTrayResources() =>
+        CheckResources(typeof(AppController), TrayResources);
 
     [STAThread]
     private static int Main(string[] args)
