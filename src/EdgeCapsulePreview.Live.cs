@@ -218,7 +218,20 @@ internal static class EdgeCapsulePreviewMeasure
         string? title,
         string? body,
         double minimum,
-        double maximum)
+        double maximum) =>
+        MeasureWidth(
+            title,
+            body,
+            minimum,
+            maximum,
+            FixedChromeReserveWidthDip);
+
+    public static double MeasureWidth(
+        string? title,
+        string? body,
+        double minimum,
+        double maximum,
+        double fixedReserveWidthDip)
     {
         var longest = Math.Max(
             DisplayWidth(title),
@@ -229,7 +242,7 @@ internal static class EdgeCapsulePreviewMeasure
                 .Select(DisplayWidth)
                 .DefaultIfEmpty(0)
                 .Max());
-        var desired = FixedChromeReserveWidthDip +
+        var desired = Math.Max(0, fixedReserveWidthDip) +
             Math.Min(64, longest) * ApproximateGlyphWidthDip;
         return Math.Clamp(Math.Ceiling(desired), minimum, maximum);
     }
