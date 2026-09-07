@@ -125,7 +125,6 @@ public sealed partial class AppController
         foreach (var window in _windows.Values)
         {
             window.UpdateTodoLinkFeature();
-            window.RefreshTodoRowsForExternalChange();
         }
         RefreshCapsuleEligibilityForLinkedPapers();
         ArrangeDeepCapsules(animate: false);

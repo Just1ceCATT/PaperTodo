@@ -2368,7 +2368,8 @@ public sealed partial class AppController
         }
 
         SaveNow();
-        ApplyTypographySettingsChange();
+        // Typography was configured above; the theme refresh rebuilds settings once.
+        RefreshTypography();
         RefreshThemeSurfaces();
     }
 

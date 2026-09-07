@@ -19,9 +19,18 @@ public sealed partial class AppController
             return;
         }
 
+        // Focus loss after detaching the old tree is deferred. Commit the active editor
+        // before its replacement reads State, so a theme/display refresh keeps the draft.
+        // Unfocused editors may still show values superseded by a page-defaults restore.
+        if (_settingsExternalMarkdownTextBox is { IsKeyboardFocusWithin: true } editor)
+        {
+            CommitExternalMarkdownExtension(editor);
+        }
+
         // The viewer belongs to the page that was displayed before navigation or refresh.
+        // A tree rebuilt again before Loaded has not restored its saved offset yet.
         if (_settingsPageScrollViewerPage is { } displayedPage &&
-            _settingsPageScrollViewer is { } previousViewer)
+            _settingsPageScrollViewer is { IsLoaded: true } previousViewer)
         {
             _settingsPageScrollOffsets[displayedPage] = previousViewer.VerticalOffset;
         }
