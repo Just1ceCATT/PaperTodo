@@ -93,26 +93,30 @@ internal static partial class Program
     {
         AppTypography.Configure(null, 1.0);
         var menu = new ContextMenu();
+        // Reuse an existing, implicitly styled item. Assigning a new Style directly to a
+        // fresh item would not check whether menu resource replacement reaches live items.
+        var item = new MenuItem { Header = "Scale", IsCheckable = true, IsChecked = true };
+        item.Items.Add(new MenuItem { Header = "Child" });
+        menu.Items.Add(item);
+        var refresh = typeof(PaperWindow).GetMethod("RefreshContextMenuTypography", PrivateStatic)!;
         var original = ReadStatic<Style>(typeof(PaperWindow), "SharedCompactMenuItemStyle");
         menu.Resources[typeof(MenuItem)] = original;
-        CheckGlyphSizes(original);
+        CheckGlyphSizes(item);
         AppTypography.Configure(null, 1.5);
         Assert(AppTypography.ScaleFactor != 1.0, "test scale was normalized to the original value");
-        typeof(PaperWindow).GetMethod("RefreshContextMenuTypography", PrivateStatic)!
-            .Invoke(null, [menu]);
+        refresh.Invoke(null, [menu]);
         var updated = (Style)menu.Resources[typeof(MenuItem)];
         Assert(!ReferenceEquals(original, updated), "existing menu still holds the old scale's style");
         Assert(ReferenceEquals(updated, ReadStatic<Style>(typeof(PaperWindow), "SharedCompactMenuItemStyle")),
             "new and existing menus do not share the current style");
-        CheckGlyphSizes(updated);
+        CheckGlyphSizes(item);
         AppTypography.Configure(null, 1.0);
-        CheckGlyphSizes(ReadStatic<Style>(typeof(PaperWindow), "SharedCompactMenuItemStyle"));
+        refresh.Invoke(null, [menu]);
+        CheckGlyphSizes(item);
     }
 
-    private static void CheckGlyphSizes(Style style)
+    private static void CheckGlyphSizes(MenuItem item)
     {
-        var item = new MenuItem { Header = "Scale", IsCheckable = true, IsChecked = true, Style = style };
-        item.Items.Add(new MenuItem { Header = "Child" });
         item.ApplyTemplate();
         var check = (TextBlock)item.Template.FindName("CheckMark", item);
         var arrow = (TextBlock)item.Template.FindName("SubMenuArrow", item);
