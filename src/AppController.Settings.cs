@@ -22,7 +22,6 @@ public sealed partial class AppController
         General,
         Todo,
         Note,
-        WindowCapsule,
         Visual,
         Shortcuts,
         Plugins,
@@ -2685,7 +2684,10 @@ public sealed partial class AppController
     // Lays the option out as: [option .....stretch.....] [ⓘ]. The trailing ⓘ shows a themed
     // tooltip with the detailed explanation on hover, so every row stays short while the full
     // description is one hover away. tipKey is a Strings resource key.
-    private UIElement WrapWithHint(FrameworkElement option, string tipKey)
+    private UIElement WrapWithHint(FrameworkElement option, string tipKey) =>
+        WrapWithHint(option, BuildSettingsHintTooltip(Strings.Get(tipKey)));
+
+    private UIElement WrapWithHint(FrameworkElement option, ToolTip tooltip)
     {
         var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2697,14 +2699,17 @@ public sealed partial class AppController
         Grid.SetColumn(option, 0);
         grid.Children.Add(option);
 
-        var hint = CreateSettingsHintGlyph(tipKey, margin: new Thickness(6, 0, 0, 0));
+        var hint = CreateSettingsHintGlyph(tooltip, margin: new Thickness(6, 0, 0, 0));
         Grid.SetColumn(hint, 1);
         grid.Children.Add(hint);
 
         return grid;
     }
 
-    private Border CreateSettingsHintGlyph(string tipKey, Thickness margin)
+    private Border CreateSettingsHintGlyph(string tipKey, Thickness margin) =>
+        CreateSettingsHintGlyph(BuildSettingsHintTooltip(Strings.Get(tipKey)), margin);
+
+    private Border CreateSettingsHintGlyph(ToolTip tooltip, Thickness margin)
     {
         var hintGlyph = new TextBlock
         {
@@ -2725,7 +2730,7 @@ public sealed partial class AppController
             Cursor = System.Windows.Input.Cursors.Help,
             VerticalAlignment = VerticalAlignment.Center,
             Child = hintGlyph,
-            ToolTip = BuildSettingsHintTooltip(Strings.Get(tipKey))
+            ToolTip = tooltip
         };
         ToolTipPreferences.SetAlwaysEnabled(hint, true);
         ToolTipService.SetInitialShowDelay(hint, 200);

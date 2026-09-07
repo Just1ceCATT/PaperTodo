@@ -238,7 +238,6 @@ public sealed partial class AppController
         yield return SettingsPage.General;
         yield return SettingsPage.Todo;
         yield return SettingsPage.Note;
-        yield return SettingsPage.WindowCapsule;
         yield return SettingsPage.Visual;
         yield return SettingsPage.Shortcuts;
         yield return SettingsPage.Plugins;
@@ -371,7 +370,6 @@ public sealed partial class AppController
         SettingsPage.General => BuildSettingsSidebarGeneralPage(),
         SettingsPage.Todo => BuildSettingsSidebarTodoPage(),
         SettingsPage.Note => BuildSettingsSidebarNotePage(),
-        SettingsPage.WindowCapsule => BuildSettingsSidebarWindowCapsulePage(),
         SettingsPage.Visual => BuildVisualSettingsPage(),
         SettingsPage.Shortcuts => BuildShortcutSettingsPage(),
         SettingsPage.Plugins => BuildPluginsSettingsPage(),
@@ -385,8 +383,6 @@ public sealed partial class AppController
             "常规", "General", "一般", "일반"),
         SettingsPage.Todo => Strings.Get("MenuTodo"),
         SettingsPage.Note => Strings.Get("PaperKindNote"),
-        SettingsPage.WindowCapsule => SettingsSidebarLocalized(
-            "窗口与胶囊", "Windows & Capsules", "ウィンドウとカプセル", "창 및 캡슐"),
         SettingsPage.Visual => Strings.Get("SettingsVisual"),
         SettingsPage.Shortcuts => Strings.Get("SettingsShortcuts"),
         SettingsPage.Plugins => Strings.Get("SettingsPlugins"),
