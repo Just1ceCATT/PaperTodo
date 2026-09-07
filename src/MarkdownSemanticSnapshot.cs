@@ -86,10 +86,15 @@ internal readonly record struct MarkdownSemanticLink(
 
 internal readonly record struct MarkdownSemanticLine(
     MarkdownSemanticLineTraits Traits,
-    int HeadingLevel)
+    int HeadingLevel,
+    int QuoteLevel)
 {
+    /// <summary>
+    /// 是否属于某个引用块（含惰性续行：物理行可无 <c>&gt;</c>，只要被 Markdig 判为引用段内容）。
+    /// QuoteLevel 与 Traits.Quote 由同一批引用 span 推导，二者一致（见 Blocks.ApplySpanToLines）。
+    /// </summary>
     public bool IsQuoted =>
-        (Traits & MarkdownSemanticLineTraits.Quote) != 0;
+        (Traits & MarkdownSemanticLineTraits.Quote) != 0 || QuoteLevel > 0;
 
     public bool IsCode =>
         (Traits & MarkdownSemanticLineTraits.Code) != 0;
