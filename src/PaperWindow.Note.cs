@@ -767,6 +767,8 @@ public sealed partial class PaperWindow
             // 内 SetPreviewMode(false) 的重排、落光标触发的 reveal 事件均保持在冻结布局上，
             // 松开后再由 up 收尾按最终光标显灵一次。
             box.BeginCaretRevealGesture();
+            // 本分支按下事件已置 Handled，AvalonEdit 不再建立捕获；显式捕获以保证手势收尾（up/丢捕获）必达。
+            box.CaptureMouse();
             ShowEditorAtPreviewPoint(point, originalSource);
             e.Handled = true;
         };

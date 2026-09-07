@@ -227,6 +227,12 @@ public sealed partial class MarkdownTextBox : TextEditor
 
         IsCaretRevealGestureActive = false;
         CaretRevealGestureEnded?.Invoke();
+        // 预览点入等由宿主显式捕获的分支：手势结束即归还捕获，避免残留捕获吞掉后续鼠标输入。
+        // 仅外层编辑器自身持捕获才释放；in-edit 态由内层 TextArea 持有的捕获不属于本层，不受影响。
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
     }
 
     public void SetImageReferenceTextMode(string mode)
