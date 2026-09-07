@@ -145,11 +145,9 @@ internal sealed partial class MarkdownSemanticPresentation
         }
     }
 
-    /// <summary>单视觉列 + U+200B（~0 宽），消耗 N 个文档字符；该列↔偏移映射一律取“内容侧”。</summary>
+    /// <summary>单视觉列 + WPF TextHidden（零宽、无字形、不引入断行点），消耗 N 个文档字符；该列↔偏移映射一律取“内容侧”。</summary>
     private sealed class CollapsedSyntaxElement : VisualLineElement
     {
-        private static readonly char[] ZeroWidth = { (char)0x200B };
-
         public CollapsedSyntaxElement(int documentLength)
             : base(1, documentLength)
         {
@@ -157,7 +155,12 @@ internal sealed partial class MarkdownSemanticPresentation
 
         public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context)
         {
-            return new TextCharacters(ZeroWidth, 0, 1, TextRunProperties);
+            // 用 WPF 原生的「隐藏内容」run，而非 U+200B 之类的零宽假字符：TextHidden 占据一个
+            // 文本位置但零 advance、不绘制，也不像 U+200B 那样带「允许在此断行」的 Unicode 语义，
+            // 不会在隐藏标记两端（如 **foo**bar 的 foo/bar 之间）引入幻影断行点。
+            // 长度必须取 VisualLength（恒为 1）而非被隐藏的源码字符数：AvalonEdit 强制
+            // run.Length > 0 且 ≤ element.VisualLength，否则抛 ArgumentException。
+            return new TextHidden(VisualLength);
         }
 
         public override int GetVisualColumn(int relativeTextOffset)
