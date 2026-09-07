@@ -322,7 +322,7 @@ public sealed partial class AppController
         var root = new DockPanel
         {
             LastChildFill = true,
-            Margin = new Thickness(24, 12, 18, 14)
+            Margin = new Thickness(16, 12, 10, 14)
         };
 
         var title = new TextBlock
@@ -331,15 +331,17 @@ public sealed partial class AppController
             Foreground = TrayTextBrush,
             FontSize = AppTypography.Scale(19),
             FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 12)
+            Margin = new Thickness(8, 0, 8, 12)
         };
         DockPanel.SetDock(title, Dock.Top);
         root.Children.Add(title);
 
-        // Constrain wrapping while keeping page margins inside the scrollable width.
+        // Advanced blocks extend their backgrounds 8 DIPs beyond the aligned controls.
+        // Keep that space inside the viewport so scrolling does not clip rounded borders.
         var content = new Border
         {
-            Width = SettingsContentWidth(),
+            Width = SettingsContentWidth() + 16,
+            Padding = new Thickness(8, 0, 8, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = BuildSettingsPage()
         };
