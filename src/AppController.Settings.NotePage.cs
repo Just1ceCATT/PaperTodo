@@ -7,8 +7,6 @@ public sealed partial class AppController
 {
     private UIElement BuildSettingsSidebarNotePage()
     {
-        _settingsExternalMarkdownTextBox = null;
-
         var content = new StackPanel
         {
             Margin = new Thickness(2, 4, 6, 0)

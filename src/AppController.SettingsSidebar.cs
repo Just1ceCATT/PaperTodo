@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -12,117 +10,28 @@ namespace PaperTodo;
 
 public sealed partial class AppController
 {
-    private enum SettingsSidebarPage
-    {
-        General,
-        Todo,
-        Note,
-        WindowCapsule,
-        Visual,
-        Shortcuts,
-        Plugins,
-        Labs
-    }
+    private readonly Dictionary<SettingsPage, double> _settingsPageScrollOffsets = new();
 
-    private readonly Dictionary<SettingsSidebarPage, double> _settingsSidebarScrollOffsets = new();
-    private SettingsSidebarPage _settingsSidebarPage = SettingsSidebarPage.General;
-    private ScrollViewer? _settingsSidebarScrollViewer;
-    private Window? _settingsSidebarAttachedWindow;
-    private DependencyPropertyDescriptor? _settingsSidebarContentDescriptor;
-    private bool _settingsSidebarApplyingContent;
-    private bool _settingsSidebarRefreshQueued;
-
-    internal void AttachSettingsSidebarHost(Window window)
+    private void RefreshSettingsWindowContent()
     {
-        if (!ReferenceEquals(window, _settingsWindow) ||
-            ReferenceEquals(window, _settingsSidebarAttachedWindow))
+        if (_settingsWindow is not { } window)
         {
             return;
         }
 
-        DetachSettingsSidebarHost();
-        _settingsSidebarAttachedWindow = window;
-        _settingsSidebarContentDescriptor = DependencyPropertyDescriptor.FromProperty(
-            ContentControl.ContentProperty,
-            typeof(Window));
-        _settingsSidebarContentDescriptor?.AddValueChanged(
-            window,
-            OnSettingsSidebarWindowContentChanged);
-        window.Closed += OnSettingsSidebarWindowClosed;
-
-        RebuildSettingsSidebarContent(window, preserveScroll: false);
-    }
-
-    private void OnSettingsSidebarWindowClosed(object? sender, EventArgs e)
-    {
-        DetachSettingsSidebarHost();
-        _settingsSidebarScrollViewer = null;
-        _settingsSidebarScrollOffsets.Clear();
-        _settingsSidebarPage = SettingsSidebarPage.General;
-    }
-
-    private void DetachSettingsSidebarHost()
-    {
-        if (_settingsSidebarAttachedWindow is { } window)
+        // The viewer belongs to the page that was displayed before navigation or refresh.
+        if (_settingsPageScrollViewerPage is { } displayedPage &&
+            _settingsPageScrollViewer is { } previousViewer)
         {
-            _settingsSidebarContentDescriptor?.RemoveValueChanged(
-                window,
-                OnSettingsSidebarWindowContentChanged);
-            window.Closed -= OnSettingsSidebarWindowClosed;
+            _settingsPageScrollOffsets[displayedPage] = previousViewer.VerticalOffset;
         }
 
-        _settingsSidebarContentDescriptor = null;
-        _settingsSidebarAttachedWindow = null;
-        _settingsSidebarRefreshQueued = false;
-    }
-
-    private void OnSettingsSidebarWindowContentChanged(object? sender, EventArgs e)
-    {
-        if (_settingsSidebarApplyingContent ||
-            sender is not Window window ||
-            !ReferenceEquals(window, _settingsWindow))
+        if (!State.AdvancedSettingsMode && _settingsPage == SettingsPage.Labs)
         {
-            return;
+            _settingsPage = SettingsPage.General;
+            _shortcutRecordingCommandId = null;
+            ClearShortcutApplyFailure();
         }
-
-        QueueSettingsSidebarRefresh(window);
-    }
-
-    private void QueueSettingsSidebarRefresh(Window window)
-    {
-        if (_settingsSidebarRefreshQueued)
-        {
-            return;
-        }
-
-        _settingsSidebarRefreshQueued = true;
-        _ = window.Dispatcher.BeginInvoke(
-            (Action)(() =>
-            {
-                _settingsSidebarRefreshQueued = false;
-                if (!ReferenceEquals(window, _settingsWindow) || !window.IsVisible)
-                {
-                    return;
-                }
-
-                RebuildSettingsSidebarContent(window, preserveScroll: true);
-            }),
-            DispatcherPriority.DataBind);
-    }
-
-    private void RebuildSettingsSidebarContent(Window window, bool preserveScroll)
-    {
-        if (!State.AdvancedSettingsMode && _settingsSidebarPage == SettingsSidebarPage.Labs)
-        {
-            _settingsSidebarPage = SettingsSidebarPage.General;
-        }
-
-        if (preserveScroll)
-        {
-            RememberSettingsSidebarScrollOffset();
-        }
-
-        _settingsPage = LegacySettingsPageFor(_settingsSidebarPage);
         if (SupportsShortcutRecording(_settingsPage))
         {
             EnsureShortcutDraft();
@@ -131,17 +40,15 @@ public sealed partial class AppController
         InvalidateSystemThemeCacheIfNeeded();
         _settingsRegionRefreshers.Clear();
         _pluginStatusRefreshers.Clear();
-
-        var content = BuildSettingsSidebarWindowContent(window);
-        _settingsSidebarApplyingContent = true;
-        try
-        {
-            window.Content = content;
-        }
-        finally
-        {
-            _settingsSidebarApplyingContent = false;
-        }
+        _settingsExternalMarkdownTextBox = null;
+        _settingsHidePapersFromTaskbarCheckBox = null;
+        _settingsHidePapersFromWindowSwitcherCheckBox = null;
+        _settingsCapsuleModeCheckBox = null;
+        _settingsDeepCapsuleModeCheckBox = null;
+        _settingsDeepCapsuleExpandedSlotCheckBox = null;
+        _settingsRememberDeepCapsuleExpandedPositionCheckBox = null;
+        _settingsCollapseExpandedDeepCapsuleOnClickCheckBox = null;
+        _settingsCapsuleCollapseAllCheckBox = null;
 
         window.Title = Strings.Get("TraySettings");
         window.SizeToContent = SizeToContent.Manual;
@@ -149,6 +56,7 @@ public sealed partial class AppController
         window.FontSize = AppTypography.Scale(12);
         window.Language = AppTypography.Language;
         AppTypography.ApplyTextRendering(window);
+        window.Content = BuildSettingsSidebarWindowContent(window);
         ApplyToolTipSetting(window);
         ApplySettingsSidebarFrame(window);
     }
@@ -191,7 +99,7 @@ public sealed partial class AppController
         Grid.SetColumn(separator, 1);
         body.Children.Add(separator);
 
-        var pageHost = BuildSettingsSidebarPageHost();
+        var pageHost = BuildSettingsPageHost();
         Grid.SetColumn(pageHost, 2);
         body.Children.Add(pageHost);
 
@@ -293,13 +201,7 @@ public sealed partial class AppController
         advancedModeToggle.ToolTip = BuildSettingsHintTooltip(Strings.Get("TipAdvancedSettingsMode"));
         footer.Children.Add(advancedModeToggle);
 
-        var signature = BuildSettingsSignature(reserveScrollBar: false);
-        if (signature is FrameworkElement signatureElement)
-        {
-            signatureElement.Margin = new Thickness(2, 10, 0, 0);
-            signatureElement.HorizontalAlignment = HorizontalAlignment.Left;
-        }
-        footer.Children.Add(signature);
+        footer.Children.Add(BuildSettingsSignature());
         DockPanel.SetDock(footer, Dock.Bottom);
         root.Children.Add(footer);
 
@@ -307,32 +209,39 @@ public sealed partial class AppController
         {
             Margin = new Thickness(10, 10, 10, 0)
         };
-        foreach (var page in SettingsSidebarPages())
+        foreach (var page in SettingsPages())
         {
             navigationItems.Children.Add(BuildSettingsSidebarNavigationItem(page));
         }
-        root.Children.Add(navigationItems);
+        root.Children.Add(new ScrollViewer
+        {
+            Content = navigationItems,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            CanContentScroll = false,
+            PanningMode = PanningMode.VerticalOnly
+        });
         return root;
     }
 
-    private IEnumerable<SettingsSidebarPage> SettingsSidebarPages()
+    private IEnumerable<SettingsPage> SettingsPages()
     {
-        yield return SettingsSidebarPage.General;
-        yield return SettingsSidebarPage.Todo;
-        yield return SettingsSidebarPage.Note;
-        yield return SettingsSidebarPage.WindowCapsule;
-        yield return SettingsSidebarPage.Visual;
-        yield return SettingsSidebarPage.Shortcuts;
-        yield return SettingsSidebarPage.Plugins;
+        yield return SettingsPage.General;
+        yield return SettingsPage.Todo;
+        yield return SettingsPage.Note;
+        yield return SettingsPage.WindowCapsule;
+        yield return SettingsPage.Visual;
+        yield return SettingsPage.Shortcuts;
+        yield return SettingsPage.Plugins;
         if (State.AdvancedSettingsMode)
         {
-            yield return SettingsSidebarPage.Labs;
+            yield return SettingsPage.Labs;
         }
     }
 
-    private UIElement BuildSettingsSidebarNavigationItem(SettingsSidebarPage page)
+    private UIElement BuildSettingsSidebarNavigationItem(SettingsPage page)
     {
-        var active = page == _settingsSidebarPage;
+        var active = page == _settingsPage;
         var border = new Border
         {
             Height = 34,
@@ -361,7 +270,7 @@ public sealed partial class AppController
 
         var label = new TextBlock
         {
-            Text = SettingsSidebarPageLabel(page),
+            Text = SettingsPageLabel(page),
             Foreground = active ? TrayTextBrush : TrayWeakTextBrush,
             FontSize = AppTypography.Scale(12.5),
             FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
@@ -375,7 +284,7 @@ public sealed partial class AppController
 
         border.MouseEnter += (_, _) =>
         {
-            if (page != _settingsSidebarPage)
+            if (page != _settingsPage)
             {
                 border.Background = TrayHoverBrush;
                 label.Foreground = TrayTextBrush;
@@ -383,7 +292,7 @@ public sealed partial class AppController
         };
         border.MouseLeave += (_, _) =>
         {
-            if (page != _settingsSidebarPage)
+            if (page != _settingsPage)
             {
                 border.Background = Brushes.Transparent;
                 label.Foreground = TrayWeakTextBrush;
@@ -391,13 +300,16 @@ public sealed partial class AppController
         };
         border.MouseLeftButtonDown += (_, e) =>
         {
-            SelectSettingsSidebarPage(page);
+            if (page != _settingsPage)
+            {
+                ShowSettingsWindow(page);
+            }
             e.Handled = true;
         };
         return border;
     }
 
-    private UIElement BuildSettingsSidebarPageHost()
+    private UIElement BuildSettingsPageHost()
     {
         var root = new DockPanel
         {
@@ -407,7 +319,7 @@ public sealed partial class AppController
 
         var title = new TextBlock
         {
-            Text = SettingsSidebarPageLabel(_settingsSidebarPage),
+            Text = SettingsPageLabel(_settingsPage),
             Foreground = TrayTextBrush,
             FontSize = AppTypography.Scale(19),
             FontWeight = FontWeights.SemiBold,
@@ -416,16 +328,25 @@ public sealed partial class AppController
         DockPanel.SetDock(title, Dock.Top);
         root.Children.Add(title);
 
+        var content = BuildSettingsPage();
+        if (content is FrameworkElement pageContent)
+        {
+            // Constrain wrapping even when horizontal scrolling measures with infinite width.
+            pageContent.Width = SettingsContentWidth();
+            pageContent.HorizontalAlignment = HorizontalAlignment.Left;
+        }
+
         var scrollViewer = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             CanContentScroll = false,
-            PanningMode = PanningMode.VerticalOnly,
-            Content = BuildSettingsSidebarPage()
+            PanningMode = PanningMode.Both,
+            Content = content
         };
-        _settingsSidebarScrollViewer = scrollViewer;
-        if (_settingsSidebarScrollOffsets.TryGetValue(_settingsSidebarPage, out var offset) && offset > 0)
+        _settingsPageScrollViewer = scrollViewer;
+        _settingsPageScrollViewerPage = _settingsPage;
+        if (_settingsPageScrollOffsets.TryGetValue(_settingsPage, out var offset) && offset > 0)
         {
             scrollViewer.Loaded += (_, _) => scrollViewer.Dispatcher.BeginInvoke(
                 (Action)(() => scrollViewer.ScrollToVerticalOffset(
@@ -436,84 +357,31 @@ public sealed partial class AppController
         return root;
     }
 
-    private UIElement BuildSettingsSidebarPage() => _settingsSidebarPage switch
+    private UIElement BuildSettingsPage() => _settingsPage switch
     {
-        SettingsSidebarPage.General => BuildSettingsSidebarGeneralPage(),
-        SettingsSidebarPage.Todo => BuildSettingsSidebarTodoPage(),
-        SettingsSidebarPage.Note => BuildSettingsSidebarNotePage(),
-        SettingsSidebarPage.WindowCapsule => BuildSettingsSidebarWindowCapsulePage(),
-        SettingsSidebarPage.Visual => BuildSettingsSidebarVisualPage(),
-        SettingsSidebarPage.Shortcuts => BuildSettingsSidebarShortcutsPage(),
-        SettingsSidebarPage.Plugins => BuildSettingsSidebarPluginsPage(),
-        SettingsSidebarPage.Labs => BuildSettingsSidebarLabsPage(),
+        SettingsPage.General => BuildSettingsSidebarGeneralPage(),
+        SettingsPage.Todo => BuildSettingsSidebarTodoPage(),
+        SettingsPage.Note => BuildSettingsSidebarNotePage(),
+        SettingsPage.WindowCapsule => BuildSettingsSidebarWindowCapsulePage(),
+        SettingsPage.Visual => BuildVisualSettingsPage(),
+        SettingsPage.Shortcuts => BuildShortcutSettingsPage(),
+        SettingsPage.Plugins => BuildPluginsSettingsPage(),
+        SettingsPage.Labs => BuildLabsSettingsPage(),
         _ => BuildSettingsSidebarGeneralPage()
     };
 
-    private void SelectSettingsSidebarPage(SettingsSidebarPage page)
+    private string SettingsPageLabel(SettingsPage page) => page switch
     {
-        if (page == SettingsSidebarPage.Labs && !State.AdvancedSettingsMode)
-        {
-            return;
-        }
-        if (page == _settingsSidebarPage)
-        {
-            return;
-        }
-
-        RememberSettingsSidebarScrollOffset();
-        var previousLegacyPage = _settingsPage;
-        var nextLegacyPage = LegacySettingsPageFor(page);
-        _settingsSidebarPage = page;
-        _settingsPage = nextLegacyPage;
-
-        if (previousLegacyPage != nextLegacyPage && SupportsShortcutRecording(previousLegacyPage))
-        {
-            _shortcutRecordingCommandId = null;
-            ClearShortcutApplyFailure();
-        }
-        if (SupportsShortcutRecording(nextLegacyPage))
-        {
-            EnsureShortcutDraft();
-        }
-
-        if (_settingsWindow is { IsVisible: true } window)
-        {
-            RebuildSettingsSidebarContent(window, preserveScroll: false);
-        }
-    }
-
-    private void RememberSettingsSidebarScrollOffset()
-    {
-        if (_settingsSidebarScrollViewer == null)
-        {
-            return;
-        }
-
-        _settingsSidebarScrollOffsets[_settingsSidebarPage] =
-            _settingsSidebarScrollViewer.VerticalOffset;
-    }
-
-    private SettingsPage LegacySettingsPageFor(SettingsSidebarPage page) => page switch
-    {
-        SettingsSidebarPage.Visual => SettingsPage.Visual,
-        SettingsSidebarPage.Shortcuts => SettingsPage.Shortcuts,
-        SettingsSidebarPage.Plugins => SettingsPage.Plugins,
-        SettingsSidebarPage.Labs => SettingsPage.Labs,
-        _ => SettingsPage.General
-    };
-
-    private string SettingsSidebarPageLabel(SettingsSidebarPage page) => page switch
-    {
-        SettingsSidebarPage.General => SettingsSidebarLocalized(
+        SettingsPage.General => SettingsSidebarLocalized(
             "常规", "General", "一般", "일반"),
-        SettingsSidebarPage.Todo => Strings.Get("MenuTodo"),
-        SettingsSidebarPage.Note => Strings.Get("PaperKindNote"),
-        SettingsSidebarPage.WindowCapsule => SettingsSidebarLocalized(
+        SettingsPage.Todo => Strings.Get("MenuTodo"),
+        SettingsPage.Note => Strings.Get("PaperKindNote"),
+        SettingsPage.WindowCapsule => SettingsSidebarLocalized(
             "窗口与胶囊", "Windows & Capsules", "ウィンドウとカプセル", "창 및 캡슐"),
-        SettingsSidebarPage.Visual => Strings.Get("SettingsVisual"),
-        SettingsSidebarPage.Shortcuts => Strings.Get("SettingsShortcuts"),
-        SettingsSidebarPage.Plugins => Strings.Get("SettingsPlugins"),
-        SettingsSidebarPage.Labs => Strings.Get("SettingsLabs"),
+        SettingsPage.Visual => Strings.Get("SettingsVisual"),
+        SettingsPage.Shortcuts => Strings.Get("SettingsShortcuts"),
+        SettingsPage.Plugins => Strings.Get("SettingsPlugins"),
+        SettingsPage.Labs => Strings.Get("SettingsLabs"),
         _ => Strings.Get("TraySettings")
     };
 
@@ -523,12 +391,12 @@ public sealed partial class AppController
         string japanese,
         string korean)
     {
-        return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        return UiLanguages.EffectiveUiCulture.TwoLetterISOLanguageName switch
         {
-            "zh" => chinese,
+            "en" => english,
             "ja" => japanese,
             "ko" => korean,
-            _ => english
+            _ => chinese
         };
     }
 

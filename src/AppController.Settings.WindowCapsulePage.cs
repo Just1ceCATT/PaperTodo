@@ -8,15 +8,6 @@ public sealed partial class AppController
 {
     private UIElement BuildSettingsSidebarWindowCapsulePage()
     {
-        _settingsHidePapersFromTaskbarCheckBox = null;
-        _settingsHidePapersFromWindowSwitcherCheckBox = null;
-        _settingsCapsuleModeCheckBox = null;
-        _settingsDeepCapsuleModeCheckBox = null;
-        _settingsDeepCapsuleExpandedSlotCheckBox = null;
-        _settingsRememberDeepCapsuleExpandedPositionCheckBox = null;
-        _settingsCollapseExpandedDeepCapsuleOnClickCheckBox = null;
-        _settingsCapsuleCollapseAllCheckBox = null;
-
         var columns = new Grid
         {
             Margin = new Thickness(2, 4, 6, 0)

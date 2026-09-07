@@ -151,7 +151,7 @@ public sealed partial class AppController
         {
             content.ColumnDefinitions.Add(new ColumnDefinition
             {
-                Width = new GridLength(Math.Min(255, SettingsWindowWidth() * 0.34))
+                Width = new GridLength(Math.Min(255, (SettingsContentWidth() + 32) * 0.34))
             });
         }
 
