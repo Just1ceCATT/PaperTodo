@@ -138,19 +138,26 @@ internal sealed partial class MarkdownSemanticPresentation
             var index = LowerBoundStart(runs, offset);
             if (index < runs.Count && runs[index].Start == offset)
             {
-                return new CollapsedSyntaxElement(runs[index].Length);
+                return new CollapsedSyntaxElement(runs[index].Length, runs[index].IsClosingEdge);
             }
 
             return null!;
         }
     }
 
-    /// <summary>单视觉列 + WPF TextHidden（零宽、无字形、不引入断行点），消耗 N 个文档字符；该列↔偏移映射一律取“内容侧”。</summary>
+    /// <summary>
+    /// 单视觉列 + WPF TextHidden（零宽、无字形、不引入断行点），消耗 N 个文档字符；该列↔偏移映射
+    /// 取"内容侧"。闭 cell 的 GetRelativeOffset 返回 cell 起点，阻止拖选时越过右侧的 ** / ] / </tag>
+    /// 等闭标记；开 cell 与历史行为一致——光标/点击落在 cell 之后的内容上。
+    /// </summary>
     private sealed class CollapsedSyntaxElement : VisualLineElement
     {
-        public CollapsedSyntaxElement(int documentLength)
+        private readonly bool _isClosingEdge;
+
+        public CollapsedSyntaxElement(int documentLength, bool isClosingEdge)
             : base(1, documentLength)
         {
+            _isClosingEdge = isClosingEdge;
         }
 
         public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context)
@@ -171,8 +178,11 @@ internal sealed partial class MarkdownSemanticPresentation
 
         public override int GetRelativeOffset(int visualColumn)
         {
-            // 本列 → 区间末尾（内容侧），让光标/点击落在隐藏标记之后的内容上。
-            return RelativeTextOffset + DocumentLength;
+            // 开 cell → 区间末尾（光标/选区落在内容起点）；闭 cell → 区间起点（光标/选区停在内容终点，
+            // 不越过闭标记），从而拖选 abc 不会把右侧 ** / ] / </tag> 带进选区。
+            return _isClosingEdge
+                ? RelativeTextOffset
+                : RelativeTextOffset + DocumentLength;
         }
 
         public override int GetNextCaretPosition(int visualColumn, LogicalDirection direction, CaretPositioningMode mode)

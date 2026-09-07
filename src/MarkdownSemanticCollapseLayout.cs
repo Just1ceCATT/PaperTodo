@@ -1,7 +1,11 @@
 namespace PaperTodo;
 
-/// <summary>一段需要在 Full 档从布局中“塌缩”的源码区间（控制符不参与排版、其余内容重排）。</summary>
-internal readonly record struct MarkdownCollapseRun(int Start, int End)
+/// <summary>
+/// 一段需要在 Full 档从布局中"塌缩"的源码区间。IsClosingEdge=true 表示该 run 是某语法单元
+/// 的闭标记 cell（**…** 的 `**`、…](url) 的 `]…`、HTML pair 的 `</tag>` 等）——光标/选区边界
+/// 需停在 cell 起点而不是越过 cell 末尾，从而避免拖选可见正文时把右侧隐藏标记带进选区。
+/// </summary>
+internal readonly record struct MarkdownCollapseRun(int Start, int End, bool IsClosingEdge)
 {
     public int Length => End - Start;
 }
@@ -84,8 +88,9 @@ internal static class MarkdownSemanticCollapseLayout
     }
 
     /// <summary>
-    /// 由静态候选 + 光标求得最终折叠区间：收集“未显灵单元”的 cell，排序后相邻合并。
-    /// 合并规则与历史实现一致（touch 或重叠即并成一条）。
+    /// 由静态候选 + 光标求得最终折叠区间：收集"未显灵单元"的 cell，按闭 cell 标志设置归属，
+    /// 排序后保持 cell 独立——不合并相邻 cell，因为合并会丢掉开/闭归属，使
+    /// CollapsedSyntaxElement 无法把闭 cell 选区右边界正确停到 cell 起点。
     /// </summary>
     internal static IReadOnlyList<MarkdownCollapseRun> Resolve(
         MarkdownCollapseCandidate[] candidates,
@@ -96,7 +101,7 @@ internal static class MarkdownSemanticCollapseLayout
             return Array.Empty<MarkdownCollapseRun>();
         }
 
-        var runs = new List<MarkdownCollapseRun>(candidates.Length);
+        var runs = new List<MarkdownCollapseRun>(candidates.Length * 2);
         foreach (var candidate in candidates)
         {
             if (RevealedAt(candidate, caret))
@@ -106,12 +111,12 @@ internal static class MarkdownSemanticCollapseLayout
 
             if (candidate.HasCell1)
             {
-                runs.Add(new MarkdownCollapseRun(candidate.Cell1Start, candidate.Cell1End));
+                runs.Add(new MarkdownCollapseRun(candidate.Cell1Start, candidate.Cell1End, IsClosingEdge: false));
             }
 
             if (candidate.HasCell2)
             {
-                runs.Add(new MarkdownCollapseRun(candidate.Cell2Start, candidate.Cell2End));
+                runs.Add(new MarkdownCollapseRun(candidate.Cell2Start, candidate.Cell2End, IsClosingEdge: true));
             }
         }
 
@@ -121,27 +126,7 @@ internal static class MarkdownSemanticCollapseLayout
         }
 
         runs.Sort(static (a, b) => a.Start.CompareTo(b.Start));
-        var merged = new List<MarkdownCollapseRun>(runs.Count);
-        foreach (var run in runs)
-        {
-            if (merged.Count == 0)
-            {
-                merged.Add(run);
-                continue;
-            }
-
-            var previous = merged[^1];
-            if (run.Start <= previous.End)
-            {
-                merged[^1] = new MarkdownCollapseRun(previous.Start, Math.Max(previous.End, run.End));
-            }
-            else
-            {
-                merged.Add(run);
-            }
-        }
-
-        return merged;
+        return runs;
     }
 
     /// <summary>单元是否因当前光标而“显灵”（显灵则不塌缩）。判定与历史 Collect* 逐点一致。</summary>
@@ -672,7 +657,7 @@ internal sealed class MarkdownCollapseTable
 
     /// <summary>
     /// 仅当候选在两个光标态间「显灵位真的翻转」时才改动 Runs（同区间移动零改动）。
-    /// 翻转方向：转为显灵 → 摘出 cell；转回塌缩 → 插入 cell。
+    /// 翻转方向：转为显灵 → 摘出 cell；转回塌缩 → 插入 cell。透传开/闭归属以保持 run 标志正确。
     /// </summary>
     private void ApplyCandidateFlip(
         int candidateIndex,
@@ -690,20 +675,20 @@ internal sealed class MarkdownCollapseTable
 
         if (nowRevealed)
         {
-            RemoveCell(candidate.Cell1Start, candidate.Cell1End);
-            RemoveCell(candidate.Cell2Start, candidate.Cell2End);
+            RemoveCell(candidate.Cell1Start, candidate.Cell1End, isClosingEdge: false);
+            RemoveCell(candidate.Cell2Start, candidate.Cell2End, isClosingEdge: true);
         }
         else
         {
-            AddCell(candidate.Cell1Start, candidate.Cell1End);
-            AddCell(candidate.Cell2Start, candidate.Cell2End);
+            AddCell(candidate.Cell1Start, candidate.Cell1End, isClosingEdge: false);
+            AddCell(candidate.Cell2Start, candidate.Cell2End, isClosingEdge: true);
         }
 
         collapseChanged = true;
     }
 
-    /// <summary>摘除 [start,end)：该格此时必落在某一条已合并 run 内，原地劈成 ≤2 段。</summary>
-    private void RemoveCell(int start, int end)
+    /// <summary>摘除 [start,end)：左段继承原 run 的归属，右段沿用本次被摘 cell 的归属。</summary>
+    private void RemoveCell(int start, int end, bool isClosingEdge)
     {
         if (end <= start)
         {
@@ -729,17 +714,17 @@ internal sealed class MarkdownCollapseTable
         _runs.RemoveAt(index);
         if (hasLeft)
         {
-            _runs.Insert(index, new MarkdownCollapseRun(run.Start, start));
+            _runs.Insert(index, new MarkdownCollapseRun(run.Start, start, run.IsClosingEdge));
         }
 
         if (hasRight)
         {
-            _runs.Insert(hasLeft ? index + 1 : index, new MarkdownCollapseRun(end, run.End));
+            _runs.Insert(hasLeft ? index + 1 : index, new MarkdownCollapseRun(end, run.End, isClosingEdge));
         }
     }
 
-    /// <summary>插入 [start,end)：与左/右邻接（touch）的已塌缩 run 合并成一条。</summary>
-    private void AddCell(int start, int end)
+    /// <summary>插入 [start,end)：有序、互不重叠、不与现有 run 合并——cell 归属作为选区右边界判定依据。</summary>
+    private void AddCell(int start, int end, bool isClosingEdge)
     {
         if (end <= start)
         {
@@ -747,35 +732,13 @@ internal sealed class MarkdownCollapseTable
         }
 
         var index = LowerBoundStart(start);
-        if (index > 0 && _runs[index - 1].End >= start)
+        if (index < _runs.Count && _runs[index].Start < end)
         {
-            index--;
+            // 兜底：cell 之间夹内容，理论上不重叠；撞上说明候选重叠，跳过避免破坏不变量。
+            return;
         }
 
-        var newStart = start;
-        var newEnd = end;
-        var walk = index;
-        while (walk < _runs.Count && _runs[walk].Start <= newEnd)
-        {
-            if (_runs[walk].Start < newStart)
-            {
-                newStart = _runs[walk].Start;
-            }
-
-            if (_runs[walk].End > newEnd)
-            {
-                newEnd = _runs[walk].End;
-            }
-
-            walk++;
-        }
-
-        if (walk > index)
-        {
-            _runs.RemoveRange(index, walk - index);
-        }
-
-        _runs.Insert(index, new MarkdownCollapseRun(newStart, newEnd));
+        _runs.Insert(index, new MarkdownCollapseRun(start, end, isClosingEdge));
     }
 
     /// <summary>首条 run.Start &gt;= value 的下标（runs 按 Start 有序）。</summary>
