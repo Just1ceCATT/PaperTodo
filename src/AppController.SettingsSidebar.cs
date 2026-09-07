@@ -328,13 +328,13 @@ public sealed partial class AppController
         DockPanel.SetDock(title, Dock.Top);
         root.Children.Add(title);
 
-        var content = BuildSettingsPage();
-        if (content is FrameworkElement pageContent)
+        // Constrain wrapping while keeping page margins inside the scrollable width.
+        var content = new Border
         {
-            // Constrain wrapping even when horizontal scrolling measures with infinite width.
-            pageContent.Width = SettingsContentWidth();
-            pageContent.HorizontalAlignment = HorizontalAlignment.Left;
-        }
+            Width = SettingsContentWidth(),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = BuildSettingsPage()
+        };
 
         var scrollViewer = new ScrollViewer
         {
