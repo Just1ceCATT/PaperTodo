@@ -10,7 +10,9 @@ namespace PaperTodo;
 
 public sealed class SingleInstanceHelper : IDisposable
 {
-    private const int SignalRetryCount = 6;
+    // Outlast the primary's two-second stalled-read deadline, including retry delays:
+    // 12 * 180 + 11 * 70 = 2930 ms. Successful connections still return immediately.
+    private const int SignalRetryCount = 12;
     private const int SignalConnectTimeoutMs = 180;
     private const int SignalRetryDelayMs = 70;
 

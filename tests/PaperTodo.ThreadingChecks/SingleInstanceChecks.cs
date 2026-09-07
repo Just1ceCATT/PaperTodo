@@ -9,7 +9,9 @@ internal static partial class Program
     private static void CheckSingleInstanceTimeout()
     {
         var name = "PaperTodo-check-" + Guid.NewGuid().ToString("N");
-        using var helper = new SingleInstanceHelper(name, name, TimeSpan.FromMilliseconds(250));
+        // Exercise the production deadline and client retry budget together; a shortened
+        // server timeout can hide a client that gives up before the stalled peer is evicted.
+        using var helper = new SingleInstanceHelper(name, name);
         var received = new ConcurrentQueue<IReadOnlyList<string>>();
         using var delivered = new ManualResetEventSlim();
         helper.StartListener(args => { received.Enqueue(args); delivered.Set(); });
