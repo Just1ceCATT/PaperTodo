@@ -72,7 +72,8 @@ internal static class MarkdownSemanticCollapseLayout
             return Array.Empty<MarkdownCollapseCandidate>();
         }
 
-        var lineStarts = BuildLineStarts(text);
+        // 行起点表已由 snapshot 在解析/增量时算好并携带，整篇构建不再重复逐字符扫行。
+        var lineStarts = snapshot.LineStarts;
         if (lineStarts.Length == 0)
         {
             return Array.Empty<MarkdownCollapseCandidate>();
@@ -81,7 +82,9 @@ internal static class MarkdownSemanticCollapseLayout
         var candidates = new List<MarkdownCollapseCandidate>();
         var unusedSpans = new List<MarkdownSemanticSpan>();
         var unusedLinks = new List<MarkdownSemanticLink>();
-        CollectCandidates(snapshot, text, lineStarts, candidates, unusedSpans, unusedLinks);
+        CollectCandidates(
+            snapshot, text, lineStarts, candidates, unusedSpans, unusedLinks,
+            0, snapshot.Spans.Count, 0, snapshot.Links.Count);
         return candidates.Count == 0
             ? Array.Empty<MarkdownCollapseCandidate>()
             : candidates.ToArray();
@@ -146,6 +149,9 @@ internal static class MarkdownSemanticCollapseLayout
     /// <summary>
     /// 扫描 snapshot 的可塌缩单元并把静态 cell 填入候选列表。cell 的计算逻辑与原 Collect* 一致，
     /// 唯一差别是不再按光标“显灵”跳过——显灵过滤后移到 Resolve/增量表，使候选只随文本版本重建。
+    /// 范围参数限定在 [spanFrom,spanTo)×[linkFrom,linkTo)（均为 snapshot 各自有序列表内的下标）：
+    /// 整篇构建传全范围；折叠表局部 rebase 传语义窗口切片（密封保证窗口内 HTML 配对自成体系，
+    /// 只需窗口内 marker 即可复现整篇配对语义）。
     /// </summary>
     internal static void CollectCandidates(
         MarkdownSemanticSnapshot snapshot,
@@ -153,15 +159,21 @@ internal static class MarkdownSemanticCollapseLayout
         int[] lineStarts,
         List<MarkdownCollapseCandidate> candidates,
         List<MarkdownSemanticSpan> spanOrigins,
-        List<MarkdownSemanticLink> linkOrigins)
+        List<MarkdownSemanticLink> linkOrigins,
+        int spanFrom,
+        int spanTo,
+        int linkFrom,
+        int linkTo)
     {
         // HTML 对是“成对区间型”（开标签 + 闭标签一起显隐），与行内 markdown 分隔符一致：
         // 不再为单个 HtmlMarker 建单格候选。先预扫一次建配对索引，供 HtmlContainer 取两端。
         var openerByStart = new Dictionary<int, int>();
         var closerByEnd = new Dictionary<int, int>();
         var containerRanges = new HashSet<(int Start, int End)>();
-        foreach (var span in snapshot.Spans)
+        var spans = snapshot.Spans;
+        for (var index = spanFrom; index < spanTo; index++)
         {
+            var span = spans[index];
             switch (span.Kind)
             {
                 case MarkdownSemanticSpanKind.HtmlContainer:
@@ -183,8 +195,9 @@ internal static class MarkdownSemanticCollapseLayout
             }
         }
 
-        foreach (var span in snapshot.Spans)
+        for (var index = spanFrom; index < spanTo; index++)
         {
+            var span = spans[index];
             MarkdownCollapseCandidate? built = span.Kind switch
             {
                 MarkdownSemanticSpanKind.Heading => BuildAtxHeading(span, source, lineStarts),
@@ -205,8 +218,10 @@ internal static class MarkdownSemanticCollapseLayout
             }
         }
 
-        foreach (var link in snapshot.Links)
+        var links = snapshot.Links;
+        for (var index = linkFrom; index < linkTo; index++)
         {
+            var link = links[index];
             // HTML <a>…</a> 的 anchor 链接：其 [Start,End] 恰与某 HtmlContainer 重合，
             // 开闭标签的塌缩已由该 container 候选接管，跳过以免重复 cell / 双候选翻转。
             if (containerRanges.Contains((link.Start, link.End)))
@@ -485,6 +500,48 @@ internal static class MarkdownSemanticCollapseLayout
 
         return starts.ToArray();
     }
+
+    /// <summary>有序 spans 中首个 Start&gt;=offset 的下标（供按窗口 [start,end) 取 span 切片）。</summary>
+    internal static int LowerBoundSpanStart(IReadOnlyList<MarkdownSemanticSpan> spans, int offset)
+    {
+        var low = 0;
+        var high = spans.Count;
+        while (low < high)
+        {
+            var middle = low + ((high - low) >> 1);
+            if (spans[middle].Start < offset)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
+
+    /// <summary>有序 links 中首个 Start&gt;=offset 的下标（供按窗口 [start,end) 取 link 切片）。</summary>
+    internal static int LowerBoundLinkStart(IReadOnlyList<MarkdownSemanticLink> links, int offset)
+    {
+        var low = 0;
+        var high = links.Count;
+        while (low < high)
+        {
+            var middle = low + ((high - low) >> 1);
+            if (links[middle].Start < offset)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
 }
 
 /// <summary>
@@ -498,6 +555,11 @@ internal sealed class MarkdownCollapseTable
     private readonly string _source;
     private readonly int[] _lineStarts;
     private readonly MarkdownCollapseCandidate[] _candidates;
+
+    // 与 _candidates 对齐的 origin（候选恰由其中一个派生，另一个为 default）。局部 rebase 需要
+    // 按 origin.Start 对既有候选分流（前缀原样 / 窗口丢弃 / 后缀平移）并重建 origin 索引。
+    private readonly MarkdownSemanticSpan[] _spanOrigins;
+    private readonly MarkdownSemanticLink[] _linkOrigins;
     private readonly Dictionary<MarkdownSemanticSpan, int> _spanIndex;
     private readonly Dictionary<MarkdownSemanticLink, int> _linkIndex;
     private readonly List<MarkdownCollapseRun> _runs;
@@ -507,6 +569,8 @@ internal sealed class MarkdownCollapseTable
         string source,
         int[] lineStarts,
         MarkdownCollapseCandidate[] candidates,
+        MarkdownSemanticSpan[] spanOrigins,
+        MarkdownSemanticLink[] linkOrigins,
         Dictionary<MarkdownSemanticSpan, int> spanIndex,
         Dictionary<MarkdownSemanticLink, int> linkIndex,
         IReadOnlyList<MarkdownCollapseRun> initialRuns,
@@ -516,6 +580,8 @@ internal sealed class MarkdownCollapseTable
         _source = source;
         _lineStarts = lineStarts;
         _candidates = candidates;
+        _spanOrigins = spanOrigins;
+        _linkOrigins = linkOrigins;
         _spanIndex = spanIndex;
         _linkIndex = linkIndex;
         _runs = new List<MarkdownCollapseRun>(initialRuns);
@@ -528,19 +594,26 @@ internal sealed class MarkdownCollapseTable
     /// <summary>有序、已合并、互不重叠的当前折叠区间。</summary>
     public IReadOnlyList<MarkdownCollapseRun> Runs => _runs;
 
-    /// <summary>整篇重建一张表（首次进入 Full / snapshot 变化后调用，O(n) 一次）。</summary>
+    /// <summary>本表构建时所基于的语义快照（rebase 前须与编辑描述里的旧快照同一引用）。</summary>
+    internal MarkdownSemanticSnapshot Snapshot => _snapshot;
+
+    /// <summary>当前静态候选（仅供 oracle 测试与诊断：与 BuildCandidates 归一化后应逐元素相等）。</summary>
+    internal IReadOnlyList<MarkdownCollapseCandidate> Candidates => _candidates;
+
+    /// <summary>整篇重建一张表（首次进入 Full / rebase 不可行时回退调用）。行起点表直接取 snapshot 携带的。</summary>
     public static MarkdownCollapseTable Build(
         MarkdownSemanticSnapshot snapshot,
         string? source,
         MarkdownCaretReveal caret)
     {
         var text = source ?? string.Empty;
-        var lineStarts = MarkdownSemanticCollapseLayout.BuildLineStarts(text);
+        var lineStarts = snapshot.LineStarts;
         var candidates = new List<MarkdownCollapseCandidate>();
         var spanOrigins = new List<MarkdownSemanticSpan>();
         var linkOrigins = new List<MarkdownSemanticLink>();
         MarkdownSemanticCollapseLayout.CollectCandidates(
-            snapshot, text, lineStarts, candidates, spanOrigins, linkOrigins);
+            snapshot, text, lineStarts, candidates, spanOrigins, linkOrigins,
+            0, snapshot.Spans.Count, 0, snapshot.Links.Count);
 
         var spanIndex = new Dictionary<MarkdownSemanticSpan, int>(candidates.Count);
         var linkIndex = new Dictionary<MarkdownSemanticLink, int>(candidates.Count);
@@ -562,8 +635,138 @@ internal sealed class MarkdownCollapseTable
             : candidates.ToArray();
         var initial = MarkdownSemanticCollapseLayout.Resolve(array, caret);
         return new MarkdownCollapseTable(
-            snapshot, text, lineStarts, array, spanIndex, linkIndex, initial, caret);
+            snapshot,
+            text,
+            lineStarts,
+            array,
+            spanOrigins.ToArray(),
+            linkOrigins.ToArray(),
+            spanIndex,
+            linkIndex,
+            initial,
+            caret);
     }
+
+    /// <summary>
+    /// 按语义层一次局部增量编辑的密封窗口把本表 rebase 到 final snapshot/source：前缀候选原样复用、
+    /// 窗口段从 final 重算、后缀整体平移 delta；origin 索引与 runs 按新候选重建并以 reveal 解析。
+    /// 语义密封保证无旧 origin 跨窗口边界，故前缀 origin 值在 final 前缀中原样保留（字典键仍命中）。
+    /// 窗口坐标非法/自相矛盾时返回 null，由调用方回退整篇 Build。
+    /// </summary>
+    internal MarkdownCollapseTable? Rebase(
+        MarkdownSemanticSnapshot newSnapshot,
+        string newSource,
+        MarkdownSemanticIncrementalWindow window,
+        MarkdownCaretReveal reveal)
+    {
+        var oldStart = window.OldStart;
+        var oldEnd = window.OldEnd;
+        var newStart = window.NewStart;
+        var newEnd = window.NewEnd;
+        if (oldStart < 0 || oldEnd < oldStart || newStart < 0 || newEnd < newStart)
+        {
+            return null;
+        }
+
+        var newLineStarts = newSnapshot.LineStarts;
+        if ((newSource.Length == 0) != (newLineStarts.Length == 0))
+        {
+            // 防御：行起点表与源长度矛盾（异常快照），不盲目 rebase。
+            return null;
+        }
+
+        var delta = newEnd - oldEnd;
+        var candidates = new List<MarkdownCollapseCandidate>(_candidates.Length + 8);
+        var spanOrigins = new List<MarkdownSemanticSpan>(_candidates.Length + 8);
+        var linkOrigins = new List<MarkdownSemanticLink>(_candidates.Length + 8);
+
+        // 前缀（Start<OldStart）原样；窗口（[OldStart,OldEnd)）被局部解析替换，丢弃；
+        // 后缀（Start>=OldEnd）整体平移 delta。分流只读 origin.Start（恒等于 candidate.Start）。
+        for (var index = 0; index < _candidates.Length; index++)
+        {
+            var originIsSpan = _spanOrigins[index].Length > 0;
+            var originStart = originIsSpan ? _spanOrigins[index].Start : _linkOrigins[index].Start;
+            if (originStart < oldStart)
+            {
+                candidates.Add(_candidates[index]);
+                spanOrigins.Add(_spanOrigins[index]);
+                linkOrigins.Add(_linkOrigins[index]);
+            }
+            else if (originStart >= oldEnd)
+            {
+                candidates.Add(ShiftCandidate(_candidates[index], delta, newLineStarts));
+                if (originIsSpan)
+                {
+                    spanOrigins.Add(MarkdownSemanticSnapshot.ShiftSpan(_spanOrigins[index], delta));
+                    linkOrigins.Add(default);
+                }
+                else
+                {
+                    spanOrigins.Add(default);
+                    linkOrigins.Add(MarkdownSemanticSnapshot.ShiftLink(_linkOrigins[index], delta));
+                }
+            }
+        }
+
+        // 窗口段从 final snapshot 重算（spans/links 各自有序 → 对 [NewStart,NewEnd) 二分取界）。
+        var spans = newSnapshot.Spans;
+        var links = newSnapshot.Links;
+        var spanFrom = MarkdownSemanticCollapseLayout.LowerBoundSpanStart(spans, newStart);
+        var spanTo = MarkdownSemanticCollapseLayout.LowerBoundSpanStart(spans, newEnd);
+        var linkFrom = MarkdownSemanticCollapseLayout.LowerBoundLinkStart(links, newStart);
+        var linkTo = MarkdownSemanticCollapseLayout.LowerBoundLinkStart(links, newEnd);
+        MarkdownSemanticCollapseLayout.CollectCandidates(
+            newSnapshot, newSource, newLineStarts, candidates, spanOrigins, linkOrigins,
+            spanFrom, spanTo, linkFrom, linkTo);
+
+        // origin → 候选索引（与 Build 同法）。
+        var spanIndex = new Dictionary<MarkdownSemanticSpan, int>(candidates.Count);
+        var linkIndex = new Dictionary<MarkdownSemanticLink, int>(candidates.Count);
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            // 候选必有非默认 origin（默认 span/link 的 Length==0，不可能是任何候选）。
+            if (spanOrigins[index].Length > 0)
+            {
+                spanIndex[spanOrigins[index]] = index;
+            }
+            else
+            {
+                linkIndex[linkOrigins[index]] = index;
+            }
+        }
+
+        var array = candidates.Count == 0
+            ? Array.Empty<MarkdownCollapseCandidate>()
+            : candidates.ToArray();
+        var initial = MarkdownSemanticCollapseLayout.Resolve(array, reveal);
+        return new MarkdownCollapseTable(
+            newSnapshot,
+            newSource,
+            newLineStarts,
+            array,
+            spanOrigins.ToArray(),
+            linkOrigins.ToArray(),
+            spanIndex,
+            linkIndex,
+            initial,
+            reveal);
+    }
+
+    /// <summary>后缀候选整体平移 delta：各偏移 +delta，空 cell（CellEnd==CellStart）保持 0；LineZero 按新行表重算。</summary>
+    private static MarkdownCollapseCandidate ShiftCandidate(
+        MarkdownCollapseCandidate candidate,
+        int delta,
+        int[] newLineStarts) =>
+        candidate with
+        {
+            LineZero = MarkdownSemanticCollapseLayout.FindLine(newLineStarts, candidate.Start + delta),
+            Start = candidate.Start + delta,
+            End = candidate.End + delta,
+            Cell1Start = candidate.HasCell1 ? candidate.Cell1Start + delta : candidate.Cell1Start,
+            Cell1End = candidate.HasCell1 ? candidate.Cell1End + delta : candidate.Cell1End,
+            Cell2Start = candidate.HasCell2 ? candidate.Cell2Start + delta : candidate.Cell2Start,
+            Cell2End = candidate.HasCell2 ? candidate.Cell2End + delta : candidate.Cell2End
+        };
 
     /// <summary>
     /// 把显灵值增量地同步到 target（以当前 Caret 为基线）。翻转集 = 旧/新光标行上登记的全部
