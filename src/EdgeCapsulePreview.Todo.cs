@@ -14,6 +14,11 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
     internal const int MaximumItemCharacters = 512;
     internal const double LinkedTargetButtonSizeDip = 20;
 
+    // Total card width lost before todo text reaches its Grid column:
+    // host close/chrome 22 + view margins 19 + items right margin 2 + row padding 7 +
+    // checkbox column 24 + text margins 6 = 80 DIPs. Marker width is added separately per row.
+    private const double TodoTextLaneFixedReserveDip = 80;
+
     public static TodoEdgeCapsulePreviewProvider Instance { get; } = new();
 
     private TodoEdgeCapsulePreviewProvider()
@@ -28,16 +33,17 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
             Environment.NewLine,
             items.Select(item => PreviewItemText(item.Text)));
         var markerReserve = MaximumMarkerReserveDip(items);
+        var textLaneReserve = TodoTextLaneFixedReserveDip + markerReserve;
         var width = EdgeCapsulePreviewMeasure.MeasureWidth(
             context.Title,
             body,
             minimum: EdgeCapsulePreviewSize.MinimumWidthDip,
-            maximum: 450);
-        // Optional right-side controls are mounted in an Auto column after the text estimate. Keep
-        // their widest rendered lane in the frozen preview width instead of letting it steal space
-        // from short todo labels after layout.
-        width = Math.Min(450, width + markerReserve);
-        var availableTextWidth = Math.Max(64, width - 60 - markerReserve);
+            maximum: 450,
+            fixedReserveWidthDip: textLaneReserve);
+        // Height estimation must subtract the same fixed lane that width estimation added. Keeping
+        // these two calculations on one reserve prevents the renderer from wrapping text that the
+        // size estimator believed still had room beside the optional marker controls.
+        var availableTextWidth = Math.Max(1, width - textLaneReserve);
         var estimatedLines = items.Count == 0
             ? 1
             : items.Sum(item => Math.Clamp(
