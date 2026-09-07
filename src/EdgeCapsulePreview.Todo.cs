@@ -12,6 +12,7 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
     // the place for browsing the full list.
     internal const int MaximumRenderedItems = 12;
     internal const int MaximumItemCharacters = 512;
+    internal const double LinkedTargetButtonSizeDip = 20;
 
     public static TodoEdgeCapsulePreviewProvider Instance { get; } = new();
 
@@ -26,12 +27,17 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
         var body = string.Join(
             Environment.NewLine,
             items.Select(item => PreviewItemText(item.Text)));
+        var markerReserve = MaximumMarkerReserveDip(items);
         var width = EdgeCapsulePreviewMeasure.MeasureWidth(
             context.Title,
             body,
             minimum: EdgeCapsulePreviewSize.MinimumWidthDip,
             maximum: 450);
-        var availableTextWidth = Math.Max(64, width - 60);
+        // Optional right-side controls are mounted in an Auto column after the text estimate. Keep
+        // their widest rendered lane in the frozen preview width instead of letting it steal space
+        // from short todo labels after layout.
+        width = Math.Min(450, width + markerReserve);
+        var availableTextWidth = Math.Max(64, width - 60 - markerReserve);
         var estimatedLines = items.Count == 0
             ? 1
             : items.Sum(item => Math.Clamp(
@@ -131,6 +137,35 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
             ? text + "…"
             : text[..(MaximumItemCharacters - 1)] + "…";
     }
+
+    private static double MaximumMarkerReserveDip(IReadOnlyList<PaperItem> items)
+    {
+        var maximum = 0.0;
+        foreach (var item in items)
+        {
+            var reserve = 0.0;
+            if (item.ReminderAt.HasValue || item.ReminderTriggered)
+            {
+                reserve += AppTypography.Scale(10.5) + 2;
+            }
+            if (HasLinkedTarget(item))
+            {
+                // 20 DIP button + its horizontal margin. The final 2 DIP below belongs to the
+                // marker lane itself and is shared with a reminder marker on the same row.
+                reserve += LinkedTargetButtonSizeDip + 2;
+            }
+            if (reserve > 0)
+            {
+                reserve += 2;
+            }
+            maximum = Math.Max(maximum, reserve);
+        }
+        return maximum;
+    }
+
+    private static bool HasLinkedTarget(PaperItem item) =>
+        !string.IsNullOrWhiteSpace(item.LinkedPaperId) ||
+        !string.IsNullOrWhiteSpace(item.LinkedPath);
 }
 
 internal sealed record TodoEdgeCapsulePreviewSnapshot(
@@ -359,18 +394,42 @@ internal sealed class TodoEdgeCapsulePreviewView : EdgeCapsuleLivePreviewView
 
         if (linkedMarker != null)
         {
-            var link = CreateMarkerText(linkedMarker);
-            link.Cursor = Cursors.Hand;
+            var glyph = CreateMarkerText(linkedMarker);
+            glyph.Margin = new Thickness(0);
+            var link = new Button
+            {
+                Content = glyph,
+                Width = TodoEdgeCapsulePreviewProvider.LinkedTargetButtonSizeDip,
+                Height = TodoEdgeCapsulePreviewProvider.LinkedTargetButtonSizeDip,
+                Margin = new Thickness(1, 0, 1, 0),
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                Focusable = false,
+                FocusVisualStyle = null,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
             EdgeCapsulePreviewInteraction.SetConsumesPointer(link, true);
             link.MouseEnter += (_, _) =>
+            {
                 link.SetResourceReference(
+                    Control.BackgroundProperty,
+                    "HoverBrushKey");
+                glyph.SetResourceReference(
                     TextBlock.ForegroundProperty,
                     "LinkBrushKey");
+            };
             link.MouseLeave += (_, _) =>
-                link.SetResourceReference(
+            {
+                link.Background = Brushes.Transparent;
+                glyph.SetResourceReference(
                     TextBlock.ForegroundProperty,
                     "WeakTextBrushKey");
-            link.MouseLeftButtonUp += (_, e) =>
+            };
+            link.Click += (_, e) =>
             {
                 Context.OpenTodoLinkedTarget(item.Id);
                 e.Handled = true;
