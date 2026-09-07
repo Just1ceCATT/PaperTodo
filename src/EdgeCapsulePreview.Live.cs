@@ -211,8 +211,10 @@ internal abstract class EdgeCapsuleLivePreviewView : Grid
 
 internal static class EdgeCapsulePreviewMeasure
 {
-    private const double ApproximateGlyphWidthDip = 6.4;
+    private const double BaseApproximateGlyphWidthDip = 6.4;
     private const double FixedChromeReserveWidthDip = 72;
+    private static double ApproximateGlyphWidthDip =>
+        AppTypography.Scale(BaseApproximateGlyphWidthDip);
 
     public static double MeasureWidth(
         string? title,
