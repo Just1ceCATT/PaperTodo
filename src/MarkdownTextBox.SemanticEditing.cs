@@ -73,6 +73,12 @@ public sealed partial class MarkdownTextBox
                     }
                 }
             }
+
+            // Full 编辑态引用续行：按语义层级在新行补 `>` 前缀（空引用行回车则结束引用，交默认换行）。
+            if (RenderModeIsFull && TryContinueQuoteOnEnter(line, text))
+            {
+                return true;
+            }
         }
 
         if (!CanApplyTextReplacement(NewLineTextAtCaret()))
