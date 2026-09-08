@@ -127,12 +127,9 @@ internal sealed partial class MarkdownSemanticPresentation
     }
 
     /// <summary>
-    /// 每帧重绘「当前 caret 显灵涉及的全部源码行」。整段显灵的范围型单元（跨行
-    /// strong/emphasis/html 容器、带可见语法的链接）两端分隔符可与 caret 分处不同物理行，
-    /// 若只重绘 caret 行，非光标端会停留在淡入早期低 alpha 的旧帧、动画结束也不补绘；故刷新
-    /// 范围与取色一致地取「caret 当前显灵 range 覆盖的行区间」。行边界单格 marker（标题/引用/
-    /// 列表/围栏/setext/分隔线/转义）只随 caret 行显灵，无 range 命中时退化为单行重绘，
-    /// 行为与旧 RedrawCaretLine 一致。
+    /// 每帧重绘「当前 caret 显灵涉及的源码行」。范围型单元（跨行 strong/html 容器等）两端可与
+    /// caret 分处不同行，故按显灵 range 覆盖的行区间整段重绘，避免非光标端停留旧帧；无 range
+    /// 命中时退化单行重绘（行边界 marker）。
     /// </summary>
     private void RedrawRevealRange()
     {
@@ -156,10 +153,8 @@ internal sealed partial class MarkdownSemanticPresentation
             var lastLine = document.GetLineByOffset(Math.Max(minStart, maxEnd - 1));
             var length = lastLine.Offset + lastLine.TotalLength - firstLine.Offset;
             textView.Redraw(firstLine.Offset, length, DispatcherPriority.Render);
-            // 兜底：AvalonEdit 对范围 Redraw 的脏标记合并可能让跨行 range 的非 caret 端
-            // visualLine 漏掉一次按当前 _fadeAlpha 的重建，导致两端 `**` 笔刷 alpha 不同步
-            // （常见表现：非 caret 端像瞬显、caret 端跟着 alpha 走，肉眼一帧之差）。这里追加
-            // 一次全量 Render Redraw，保证跨行加粗等 range 的两端都与当前帧 alpha 对齐。
+            // AvalonEdit 范围 Redraw 的脏标记合并可能漏掉跨行 range 的非 caret 端，使两端
+            // alpha 一帧不同步；追加一次全量 Render Redraw 对齐两端。
             textView.Redraw(DispatcherPriority.Render);
             return;
         }
@@ -176,11 +171,9 @@ internal sealed partial class MarkdownSemanticPresentation
     }
 
     /// <summary>
-    /// 求 caret 行上所有「整段显灵 range」的并集起止绝对偏移（闭区间 [Start, End]），判定条件
-    /// 与各取色点一一对应：范围型 span（Emphasis/Strong/Strikethrough/InlineCode/HtmlContainer）
-    /// + 带可见语法的链接。任一显灵 range 都含 caret offset，故必挂到 caret 行（唯一反例是
-    /// caret == End 落在下一行首，此时淡入不会被启动，见 SyncRevealFade），从 caret 行出发
-    /// 即可穷尽全部受淡入影响的跨行端。
+    /// 求 caret 行上所有「整段显灵 range」的并集起止绝对偏移（闭区间）。任一显灵 range 必含
+    /// caret offset，故必挂到 caret 行（反例 caret==End 落在下一行首时不启动淡入），从 caret
+    /// 行即可穷尽受淡入影响的跨行端。
     /// </summary>
     private bool TryGetRevealedRangeExtent(
         MarkdownCaretReveal reveal,

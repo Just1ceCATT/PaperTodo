@@ -11,9 +11,8 @@ public sealed partial class MarkdownTextBox
     private TextDocument? _quoteChangedDocument;
 
     /// <summary>
-    /// 引用「惰性续行」源码补齐的编辑器侧接线。Full 档正文缩进依赖真实 `&gt;` 占位字形，惰性续行
-    /// 没有占位会与引用左竖条重叠（见 MarkdownQuoteNormalization）。策略：只把「语义 QuoteLevel&gt;0 但
-    /// 显式 `&gt;` 为 0」的纯惰性行按层级补上前缀，不改写用户已手写的 marker 结构。
+    /// 引用「惰性续行」源码补齐的编辑器侧接线（纯计算见 MarkdownQuoteNormalization）：只把
+    /// 「语义 QuoteLevel&gt;0 但显式 `&gt;` 为 0」的惰性行按层级补前缀，不改写用户已手写的 marker。
     /// </summary>
     private void AttachQuoteContinuationTracking()
     {
@@ -37,8 +36,8 @@ public sealed partial class MarkdownTextBox
     }
 
     /// <summary>
-    /// 行结构类变更（插入/删除含换行）才可能新建惰性续行，排队一次补齐；单行内输入不会造成惰性行，
-    /// 不排队，避免每个键都全篇扫描。Fill 自身的前缀插入不含换行，天然不会自我再触发。
+    /// 只有含换行的变更才可能新建惰性续行，故仅此时排队补齐；单行输入不排队，避免每个键全篇扫描。
+    /// Fill 自身的前缀插入不含换行，不会自我再触发。
     /// </summary>
     private void OnQuoteContinuationDocumentChanged(object? sender, DocumentChangeEventArgs e)
     {
@@ -184,8 +183,7 @@ public sealed partial class MarkdownTextBox
     }
 
     /// <summary>
-    /// Full 编辑态在引用内容行按 Enter：新行按语义层级续上前缀（与列表续行一致），让后续输入仍在引用内；
-    /// 引用行为空（仅 marker）时返回 false，交给默认换行产生空行以结束引用。
+    /// Full 编辑态在引用内容行按 Enter 时按语义层级续前缀；空引用行返回 false，交默认换行结束引用。
     /// </summary>
     private bool TryContinueQuoteOnEnter(DocumentLine line, string text)
     {

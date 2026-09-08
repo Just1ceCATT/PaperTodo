@@ -77,10 +77,8 @@ internal static class MarkdownSemanticReveal
     }
 
     /// <summary>
-    /// caret 所在行是否至少有一个控制符显灵。作为「进入编辑态」淡入的上升沿判定：
-    /// reveal 单元全部落在 caret 所在 DocumentLine 上，故只需判定该行是否存在任一显灵单元。
-    /// 判定参数与各取色点（Blocks/Lists/Html/Colorizer）保持一致；漏判只会使对应标记失去淡入
-    /// （仍保持瞬显），不会产生错误显示。
+    /// caret 行是否至少有一个控制符显灵，作为「进入编辑态」淡入的上升沿判定。判定参数与各取色点
+    /// 保持一致；漏判只使对应标记失去淡入（仍瞬显），不产生错误显示。
     /// </summary>
     public static bool HasRevealOnLine(
         MarkdownSemanticSnapshot snapshot,

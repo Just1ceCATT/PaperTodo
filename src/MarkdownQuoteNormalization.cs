@@ -3,18 +3,16 @@ using System.Collections.Generic;
 namespace PaperTodo;
 
 /// <summary>
-/// 引用「惰性续行」源码补齐的纯计算（无 WPF 依赖，可被 MarkdownSemanticChecks 直接链接测试）。
-/// Full 档正文缩进依赖真实 `&gt;` 占位字形：语义属引用但物理行无 `&gt;` 的行（惰性续行）没有占位，
-/// 正文会贴到 x≈0 与引用左竖条重叠。这里按「引用层级」算出缺失前缀的插入点，而不是看行内是否已写
-/// `&gt;`——只要该行语义 QuoteLevel 高于其显式 marker 数就补差量。
+/// 引用「惰性续行」源码补齐的纯计算（无 WPF 依赖，可链接测试）。Full 档正文缩进依赖真实 `&gt;`
+/// 占位字形：语义属引用但物理行无 `&gt;` 的惰性续行没有占位，正文会与引用左竖条重叠，故按其
+/// 语义 QuoteLevel 补差量前缀。
 /// </summary>
 internal static class MarkdownQuoteNormalization
 {
     /// <summary>
-    /// 计算要把 source 中所有「纯惰性续行」（显式 `&gt;` 计数为 0 但语义 QuoteLevel&gt;0）提升到其
-    /// 引用层级所需的前缀插入。返回按插入点升序的编辑。
-    /// 保守策略：只补 k==0 的行。已有 ≥1 个显式 `&gt;` 的行是用户亲手写的结构（可能是有意的嵌套退出，
-    /// 如 Markdig 在「深层紧邻浅行」会把浅行计入内层层级），改写会违背用户意图，故不自动补。
+    /// 计算把 source 中「显式 `&gt;` 为 0 但语义 QuoteLevel&gt;0」的惰性续行提升到其引用层级所需的
+    /// 前缀插入（按插入点升序）。保守策略：只补无显式 marker 的行——已有 ≥1 个 `&gt;` 是用户手写
+    /// 结构（可能是刻意的嵌套退出），不自动改写。
     /// </summary>
     public static List<MarkdownQuoteFillEdit> ComputeFillEdits(
         string source,
@@ -81,7 +79,7 @@ internal static class MarkdownQuoteNormalization
                 insertOffset++; // 保留 ≤3 前导空格作为 marker 缩进，marker 从内容起点前插入。
             }
 
-            var prefix = level == 1 ? "> " : RepeatMarkerPrefix(level);
+            var prefix = RepeatMarkerPrefix(level);
             edits.Add(new MarkdownQuoteFillEdit(insertOffset, prefix));
         }
 

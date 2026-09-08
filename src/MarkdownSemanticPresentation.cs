@@ -85,9 +85,6 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
             ? snapshot
             : MarkdownSemanticSnapshot.Empty;
 
-    private MarkdownSemanticLine SemanticFor(DocumentLine line) =>
-        CurrentSnapshot().GetLine(Math.Max(0, line.LineNumber - 1));
-
     internal MarkdownCaretReveal CaretReveal =>
         !FullRevealEnabled
             ? MarkdownCaretReveal.None // 预览态绝不显灵：优先级高于冻结快照，覆盖手势中途退回预览
@@ -203,7 +200,6 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
 
         SyncCaretReveal();
         SyncRevealFade();
-        // 折叠/显灵只在“旧/新光标行的显灵集合变化”时才需要重排；同区间移动、无格式区移动零开销。
         AlignCollapseTableToReveal(scheduleRedraw: true);
     }
 
@@ -223,7 +219,6 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
 
         SyncCaretReveal();
         SyncRevealFade();
-        // 折叠/显灵只在“旧/新光标行的显灵集合变化”时才需要重排；同区间移动、无格式区移动零开销。
         AlignCollapseTableToReveal(scheduleRedraw: true);
     }
 
@@ -277,9 +272,8 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
         // 文本编辑会使标记位移：中止进行中的淡入，避免把旧 alpha 施加到新布局的标记上。
         AbortRevealFade();
 
-        // 语义版本变化：静态候选须随新 snapshot 重建。优先按语义层增量窗口做局部 rebase（本表快照
-        // 与编辑前的旧快照同一引用时链式生效，逐键 O(#候选+窗口)，不整篇扫）；整篇解析/多帧合并/
-        // 预览态等不满足时回退置 null，由下次 Ensure 整篇构建（现状成本）。
+        // 静态候选随 snapshot 重建：优先按语义层增量窗口局部 rebase（逐键、不整篇扫）；
+        // 不满足（整篇解析/预览态等）时回退置 null，由下次 Ensure 整篇构建。
         var table = _collapseTable;
         if (table != null &&
             IsFullMode &&

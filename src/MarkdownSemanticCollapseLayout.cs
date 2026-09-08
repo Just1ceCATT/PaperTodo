@@ -44,7 +44,7 @@ internal readonly record struct MarkdownCollapseChange(
 ///
 /// 折叠区间按两阶段得到：
 /// - 静态候选（BuildCandidates）：每个可塌缩单元随 snapshot 重建一次，含其塌缩 cell 区间。
-/// - Resolve：按当前光标过滤“显灵单元”后把 cell 排序、相邻合并，即最终折叠区间表。
+/// - Resolve：按当前光标过滤”显灵单元”后把 cell 排序（不合并，保留开/闭归属）。
 ///
 /// MarkdownCollapseTable 复用同一份候选做增量维护：光标变化只翻转旧/新光标行上登记单元的显灵
 /// 位，对 cell 做局部摘除/插入，避免每次光标移动都全篇重算。
@@ -147,11 +147,9 @@ internal static class MarkdownSemanticCollapseLayout
     }
 
     /// <summary>
-    /// 扫描 snapshot 的可塌缩单元并把静态 cell 填入候选列表。cell 的计算逻辑与原 Collect* 一致，
-    /// 唯一差别是不再按光标“显灵”跳过——显灵过滤后移到 Resolve/增量表，使候选只随文本版本重建。
-    /// 范围参数限定在 [spanFrom,spanTo)×[linkFrom,linkTo)（均为 snapshot 各自有序列表内的下标）：
-    /// 整篇构建传全范围；折叠表局部 rebase 传语义窗口切片（密封保证窗口内 HTML 配对自成体系，
-    /// 只需窗口内 marker 即可复现整篇配对语义）。
+    /// 扫描 snapshot 的可塌缩单元并把静态 cell 填入候选列表（不按光标显灵跳过——过滤后移到
+    /// Resolve/增量表）。范围参数限定 [spanFrom,spanTo)×[linkFrom,linkTo)：整篇传全范围，rebase
+    /// 传语义窗口切片（密封保证窗口内 HTML 配对自成体系）。
     /// </summary>
     internal static void CollectCandidates(
         MarkdownSemanticSnapshot snapshot,
@@ -367,9 +365,8 @@ internal static class MarkdownSemanticCollapseLayout
     }
 
     /// <summary>
-    /// HTML 开闭标签对：一个 HtmlContainer 一个成对候选。Cell1=开标签（&lt;b&gt; / &lt;a …&gt;）、
-    /// Cell2=闭标签（&lt;/b&gt; / &lt;/a&gt;），显灵 = caret ∈ [container.Start, container.End]——
-    /// 两端标签一起显隐，不再按“光标是否越过单枚标签起点”逐个显灵。
+    /// HTML 开闭标签对：一个 HtmlContainer 一个成对候选。Cell1=开标签、Cell2=闭标签，显灵 =
+    /// caret ∈ [container.Start, container.End]——两端标签一起显隐。
     /// </summary>
     private static MarkdownCollapseCandidate? BuildHtmlPair(
         MarkdownSemanticSpan container,
@@ -545,7 +542,7 @@ internal static class MarkdownSemanticCollapseLayout
 }
 
 /// <summary>
-/// 增量折叠区间表：静态候选（随文本版本重建一次）+ 一份始终有序、已合并的折叠区间 Runs。
+/// 增量折叠区间表：静态候选（随文本版本重建一次）+ 一份始终有序、互不重叠的折叠区间 Runs。
 /// 光标变化时由 SyncTo 只对「旧/新光标行上显灵状态翻转」的候选做局部摘除/插入，保持
 /// Runs 等于 Resolve(候选, 当前光标) 的不变式；同区间移动不触发任何改动。
 /// </summary>
@@ -591,7 +588,7 @@ internal sealed class MarkdownCollapseTable
     /// <summary>当前 Runs 所对应的显灵值（预览= None；手势冻结=按下瞬间快照）。</summary>
     public MarkdownCaretReveal Caret { get; private set; }
 
-    /// <summary>有序、已合并、互不重叠的当前折叠区间。</summary>
+    /// <summary>有序、互不重叠的当前折叠区间。</summary>
     public IReadOnlyList<MarkdownCollapseRun> Runs => _runs;
 
     /// <summary>本表构建时所基于的语义快照（rebase 前须与编辑描述里的旧快照同一引用）。</summary>
@@ -648,10 +645,8 @@ internal sealed class MarkdownCollapseTable
     }
 
     /// <summary>
-    /// 按语义层一次局部增量编辑的密封窗口把本表 rebase 到 final snapshot/source：前缀候选原样复用、
-    /// 窗口段从 final 重算、后缀整体平移 delta；origin 索引与 runs 按新候选重建并以 reveal 解析。
-    /// 语义密封保证无旧 origin 跨窗口边界，故前缀 origin 值在 final 前缀中原样保留（字典键仍命中）。
-    /// 窗口坐标非法/自相矛盾时返回 null，由调用方回退整篇 Build。
+    /// 按语义窗口把本表 rebase 到 final snapshot/source：前缀原样复用、窗口段重算、后缀平移 delta，
+    /// 再以 reveal 解析重建 runs。语义密封保证无旧 origin 跨窗口边界。窗口坐标非法时返回 null。
     /// </summary>
     internal MarkdownCollapseTable? Rebase(
         MarkdownSemanticSnapshot newSnapshot,
@@ -769,8 +764,8 @@ internal sealed class MarkdownCollapseTable
         };
 
     /// <summary>
-    /// 把显灵值增量地同步到 target（以当前 Caret 为基线）。翻转集 = 旧/新光标行上登记的全部
-    /// span/link + 引用单元；同区间移动翻转集为空 → 零改动、VisualChanged=false。
+    /// 把显灵值增量同步到 target：翻转集 = 旧/新光标行上登记的 span/link + 引用单元；同区间移动
+    /// 翻转集为空 → 零改动。
     /// </summary>
     public MarkdownCollapseChange SyncTo(MarkdownCaretReveal target)
     {
@@ -859,8 +854,8 @@ internal sealed class MarkdownCollapseTable
     }
 
     /// <summary>
-    /// 仅当候选在两个光标态间「显灵位真的翻转」时才改动 Runs（同区间移动零改动）。
-    /// 翻转方向：转为显灵 → 摘出 cell；转回塌缩 → 插入 cell。透传开/闭归属以保持 run 标志正确。
+    /// 仅当候选在两光标态间「显灵位真的翻转」时才改动 Runs。转为显灵摘出 cell，转回塌缩插入 cell，
+    /// 并透传开/闭归属。
     /// </summary>
     private void ApplyCandidateFlip(
         int candidateIndex,

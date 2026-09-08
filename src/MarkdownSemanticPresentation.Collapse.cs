@@ -146,9 +146,8 @@ internal sealed partial class MarkdownSemanticPresentation
     }
 
     /// <summary>
-    /// 单视觉列 + WPF TextHidden（零宽、无字形、不引入断行点），消耗 N 个文档字符；该列↔偏移映射
-    /// 取"内容侧"。闭 cell 的 GetRelativeOffset 返回 cell 起点，阻止拖选时越过右侧的 ** / ] / </tag>
-    /// 等闭标记；开 cell 与历史行为一致——光标/点击落在 cell 之后的内容上。
+    /// 单视觉列 + WPF TextHidden（零宽、无字形、不引入断行点），消耗 N 个文档字符。闭 cell 的
+    /// GetRelativeOffset 返回 cell 起点，阻止拖选越过右侧的 ** / ] / </tag> 等闭标记。
     /// </summary>
     private sealed class CollapsedSyntaxElement : VisualLineElement
     {
@@ -162,11 +161,9 @@ internal sealed partial class MarkdownSemanticPresentation
 
         public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context)
         {
-            // 用 WPF 原生的「隐藏内容」run，而非 U+200B 之类的零宽假字符：TextHidden 占据一个
-            // 文本位置但零 advance、不绘制，也不像 U+200B 那样带「允许在此断行」的 Unicode 语义，
-            // 不会在隐藏标记两端（如 **foo**bar 的 foo/bar 之间）引入幻影断行点。
-            // 长度必须取 VisualLength（恒为 1）而非被隐藏的源码字符数：AvalonEdit 强制
-            // run.Length > 0 且 ≤ element.VisualLength，否则抛 ArgumentException。
+            // 用 WPF TextHidden 而非 U+200B 之类的零宽假字符：零 advance、不绘制，且不带「允许
+            // 在此断行」语义，不会在隐藏标记两端引入幻影断行点。长度取 VisualLength（恒为 1）而非
+            // 源码字符数：AvalonEdit 强制 run.Length ≤ element.VisualLength，否则抛异常。
             return new TextHidden(VisualLength);
         }
 
