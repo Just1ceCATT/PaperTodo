@@ -265,32 +265,12 @@ internal sealed partial class MarkdownSemanticPresentation
             DocumentLine line,
             MarkdownSemanticSpan task)
         {
-            if (!MarkdownSemanticPresentation.TryGetTextPoint(
-                    textView,
-                    line,
-                    task.Start,
-                    VisualYPosition.TextTop,
-                    out var topLeft) ||
-                !MarkdownSemanticPresentation.TryGetTextPoint(
-                    textView,
-                    line,
-                    task.End,
-                    VisualYPosition.TextBottom,
-                    out var bottomRight))
+            if (!MarkdownTaskCheckBoxGeometry.TryGetRect(textView, line, task, out var rect))
             {
                 return;
             }
 
-            var cellLeft = Math.Min(topLeft.X, bottomRight.X);
-            var cellRight = Math.Max(topLeft.X, bottomRight.X);
-            var height = Math.Max(1, bottomRight.Y - topLeft.Y);
-            var boxSize = Math.Max(1, Math.Min(height * 0.7, cellRight - cellLeft));
-            var rect = new Rect(
-                cellLeft + (cellRight - cellLeft - boxSize) / 2,
-                topLeft.Y + (height - boxSize) / 2,
-                boxSize,
-                boxSize);
-
+            var boxSize = rect.Width;
             drawingContext.DrawRectangle(Theme.PaperBrush, null, rect);
             var penWidth = Math.Max(1.0, boxSize * 0.09);
             var pen = new Pen(Theme.PaperBorderBrush, penWidth);

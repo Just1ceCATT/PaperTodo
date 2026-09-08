@@ -19,7 +19,22 @@ public sealed partial class PaperWindow
         return false;
     }
 
-    private static bool IsScrollBarInteractionSource(DependencyObject? current, DependencyObject scope)
+    /// <summary>
+    /// The built-in note mouse handler currently passes its MarkdownTextBox directly. Keep the
+    /// rendered-task consumption guard on that narrow overload so the reusable scrollbar traversal
+    /// below stays a pure visual-tree question.
+    /// </summary>
+    private static bool IsScrollBarInteractionSource(
+        DependencyObject? current,
+        MarkdownTextBox scope)
+    {
+        return scope.RenderedTaskCheckBoxMouseDownHandled ||
+            IsScrollBarInteractionSource(current, (DependencyObject)scope);
+    }
+
+    private static bool IsScrollBarInteractionSource(
+        DependencyObject? current,
+        DependencyObject scope)
     {
         while (current != null)
         {
