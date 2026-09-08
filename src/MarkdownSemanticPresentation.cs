@@ -134,19 +134,20 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
         return FadeSyntax ? Brushes.Transparent : Theme.ActiveBrush;
     }
 
-    private double ScaledFontSize(double baseFontSize)
-    {
-        var baseSize = Math.Max(1, NoteTypography.FontSize);
-        var scale = Math.Clamp(_editor.FontSize / baseSize, 0.5, 1.5);
-        return Math.Round(baseFontSize * scale, 1);
-    }
-
-    /// <summary>当前字号缩放系数（0.5..1.5）。图形元素的像素度量乘它后与文本同步缩放。</summary>
-    internal double ZoomFactor()
+    private double ComputeScale()
     {
         var baseSize = Math.Max(1, NoteTypography.FontSize);
         return Math.Clamp(_editor.FontSize / baseSize, 0.5, 1.5);
     }
+
+    private double ScaledFontSize(double baseFontSize)
+    {
+        var scale = ComputeScale();
+        return Math.Round(baseFontSize * scale, 1);
+    }
+
+    /// <summary>当前字号缩放系数（0.5..1.5）。图形元素的像素度量乘它后与文本同步缩放。</summary>
+    internal double ZoomFactor() => ComputeScale();
 
     private static bool TryGetTextPoint(
         TextView textView,

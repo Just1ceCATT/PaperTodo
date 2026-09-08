@@ -56,7 +56,7 @@ internal sealed partial class MarkdownSemanticPresentation
 
             foreach (var line in visible)
             {
-                var lineIndex = Math.Max(0, line.LineNumber - 1);
+                var lineIndex = LineIndex(line);
                 foreach (var span in snapshot.SpansForLine(lineIndex))
                 {
                     if (span.Kind == MarkdownSemanticSpanKind.InlineCode && span.Length > 0)
@@ -90,7 +90,7 @@ internal sealed partial class MarkdownSemanticPresentation
         /// <summary>该行是否被纳入代码块背景（Full 档含围栏开/闭行，其余档位维持旧语义）。</summary>
         private bool IsCodeRow(MarkdownSemanticSnapshot snapshot, DocumentLine line)
         {
-            var semantic = snapshot.GetLine(Math.Max(0, line.LineNumber - 1));
+            var semantic = snapshot.GetLine(LineIndex(line));
             if (!semantic.IsCode)
             {
                 return false;
@@ -162,7 +162,7 @@ internal sealed partial class MarkdownSemanticPresentation
             var index = 0;
             while (index < count)
             {
-                if (!snapshot.GetLine(Math.Max(0, visible[index].LineNumber - 1)).IsQuoted)
+                if (!snapshot.GetLine(LineIndex(visible[index])).IsQuoted)
                 {
                     index++;
                     continue;
@@ -171,7 +171,7 @@ internal sealed partial class MarkdownSemanticPresentation
                 var first = visible[index];
                 var last = first;
                 while (index + 1 < count &&
-                       snapshot.GetLine(Math.Max(0, visible[index + 1].LineNumber - 1)).IsQuoted)
+                       snapshot.GetLine(LineIndex(visible[index + 1])).IsQuoted)
                 {
                     index++;
                     last = visible[index];
@@ -192,11 +192,15 @@ internal sealed partial class MarkdownSemanticPresentation
         private static double RowTop(TextView textView, DocumentLine line) =>
             textView.GetVisualTopByDocumentLine(line.LineNumber) - textView.VerticalOffset;
 
+        /// <summary>DocumentLine.LineNumber 是 1-based，零基索引取 max 防越界。</summary>
+        private static int LineIndex(DocumentLine line) =>
+            Math.Max(0, line.LineNumber - 1);
+
         /// <summary>
         /// 行在视口坐标系中的下沿：优先用“下一 DocumentLine 的上沿”（覆盖整行含软折行全部
         /// VisualLine）；若已是文档末行，则取其最后一个 VisualLine 的底部兜底，避免折行缺尾。
         /// </summary>
-        private double RowBottom(TextView textView, DocumentLine line)
+        private static double RowBottom(TextView textView, DocumentLine line)
         {
             if (line.NextLine != null)
             {

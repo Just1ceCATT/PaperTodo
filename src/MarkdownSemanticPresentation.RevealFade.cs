@@ -39,15 +39,7 @@ internal sealed partial class MarkdownSemanticPresentation
     /// </summary>
     private void SyncRevealFade()
     {
-        if (!RevealFadeEnabled)
-        {
-            AbortRevealFade();
-            _lastLineReveal = false;
-            _lastRevealCaretLine = -1;
-            return;
-        }
-
-        if (!TryGetCaretLineZero(out var lineZero))
+        if (!RevealFadeEnabled || !TryGetCaretLineZero(out var lineZero))
         {
             AbortRevealFade();
             _lastLineReveal = false;

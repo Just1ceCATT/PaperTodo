@@ -55,9 +55,7 @@ internal static class MarkdownSemanticReveal
 
         if (IsRangeKind(kind))
         {
-            return rangeStart >= 0 &&
-                rangeEnd > rangeStart &&
-                RevealRange(caret, rangeStart, rangeEnd);
+            return RevealRange(caret, rangeStart, rangeEnd);
         }
 
         return caret.CaretLineZeroBased == markerLineZeroBased &&
@@ -146,35 +144,15 @@ internal static class MarkdownSemanticReveal
         return false;
     }
 
-    /// <summary>引用行的显灵 `>` 单元扫描：行首最多 3 空格后连续 `>`（含嵌套），规则同渲染器。</summary>
+    /// <summary>引用行是否存在已显灵的 `>` 单元（caret 位于任一 marker 起点之后）。</summary>
     private static bool HasRevealedQuoteCell(
         string lineText,
         int lineAbsStart,
         MarkdownCaretReveal caret)
     {
-        var index = 0;
-        while (index < lineText.Length)
+        foreach (var marker in MarkdownQuoteNormalization.EnumerateMarkers(lineText, 0, lineText.Length))
         {
-            var spaces = 0;
-            while (index < lineText.Length && spaces < 3 && lineText[index] == ' ')
-            {
-                index++;
-                spaces++;
-            }
-
-            if (index >= lineText.Length || lineText[index] != '>')
-            {
-                return false;
-            }
-
-            var start = index;
-            index++;
-            if (index < lineText.Length && lineText[index] is ' ' or '\t')
-            {
-                index++;
-            }
-
-            if (caret.CaretOffset >= lineAbsStart + start)
+            if (caret.CaretOffset >= lineAbsStart + marker.Start)
             {
                 return true;
             }

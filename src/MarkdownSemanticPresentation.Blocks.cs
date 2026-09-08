@@ -53,7 +53,7 @@ internal sealed partial class MarkdownSemanticPresentation
         {
             // The mature enhanced-preview renderer made explicit quote markers fully transparent
             // (while retaining their original character width), which is distinct from generic syntax fade.
-            foreach (var marker in ExplicitQuoteMarkers(text))
+            foreach (var marker in MarkdownQuoteNormalization.EnumerateMarkers(text, 0, text.Length))
             {
                 var start = line.Offset + marker.Start;
                 var end = line.Offset + marker.End;
@@ -223,31 +223,5 @@ internal sealed partial class MarkdownSemanticPresentation
             }
         }
 
-        private static IEnumerable<(int Start, int End)> ExplicitQuoteMarkers(string text)
-        {
-            var index = 0;
-            while (index < text.Length)
-            {
-                var spaces = 0;
-                while (index < text.Length && spaces < 3 && text[index] == ' ')
-                {
-                    index++;
-                    spaces++;
-                }
-
-                if (index >= text.Length || text[index] != '>')
-                {
-                    yield break;
-                }
-
-                var start = index;
-                index++;
-                if (index < text.Length && text[index] is ' ' or '\t')
-                {
-                    index++;
-                }
-                yield return (start, index);
-            }
-        }
     }
 }

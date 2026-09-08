@@ -176,7 +176,7 @@ internal static class IncrementalCollapseChecks
     private static void StepThrough(string source)
     {
         var snapshot = MarkdownSemanticSnapshot.Parse(source);
-        var lineStarts = MarkdownSemanticCollapseLayout.BuildLineStarts(source);
+        var lineStarts = MarkdownSemanticSnapshot.BuildLineStarts(source);
         var caret = new MarkdownCaretReveal(0, 0);
         var table = MarkdownCollapseTable.Build(snapshot, source, caret);
         AssertRunsMatch(source, snapshot, table, caret);
@@ -211,7 +211,7 @@ internal static class IncrementalCollapseChecks
 
     private static int LineOf(string source, int offset)
     {
-        var starts = MarkdownSemanticCollapseLayout.BuildLineStarts(source);
+        var starts = MarkdownSemanticSnapshot.BuildLineStarts(source);
         return MarkdownSemanticCollapseLayout.FindLine(starts, offset);
     }
 

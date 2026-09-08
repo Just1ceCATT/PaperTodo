@@ -7,7 +7,7 @@ public sealed partial class MarkdownTextBox
 {
     private bool _quoteFillQueued;
     private bool _quoteFilling;
-    private bool _quoteChangedSubscribed;
+    // 非 null 即已订阅 Changed 事件——合并自原 _quoteChangedSubscribed，二者状态互为冗余。
     private TextDocument? _quoteChangedDocument;
 
     /// <summary>
@@ -16,13 +16,9 @@ public sealed partial class MarkdownTextBox
     /// </summary>
     private void AttachQuoteContinuationTracking()
     {
-        if (_quoteChangedSubscribed)
+        if (_quoteChangedDocument != null)
         {
-            _quoteChangedSubscribed = false;
-            if (_quoteChangedDocument != null)
-            {
-                _quoteChangedDocument.Changed -= OnQuoteContinuationDocumentChanged;
-            }
+            _quoteChangedDocument.Changed -= OnQuoteContinuationDocumentChanged;
             _quoteChangedDocument = null;
         }
 
@@ -30,7 +26,6 @@ public sealed partial class MarkdownTextBox
         if (_semanticDocument != null && document != null)
         {
             document.Changed += OnQuoteContinuationDocumentChanged;
-            _quoteChangedSubscribed = true;
             _quoteChangedDocument = document;
         }
     }
@@ -213,7 +208,7 @@ public sealed partial class MarkdownTextBox
             return false;
         }
 
-        var prefix = RepeatQuotePrefix(level);
+        var prefix = MarkdownQuoteNormalization.RepeatMarkerPrefix(level);
         var insertion = NewLineTextFor(line) + prefix;
         if (MaxLength > 0 && Text.Length + insertion.Length > MaxLength)
         {
@@ -235,32 +230,11 @@ public sealed partial class MarkdownTextBox
         return true;
     }
 
-    /// <summary>行首显式引用 marker 组之后的正文起点（与渲染侧 ExplicitQuoteMarkers 同规则）。</summary>
+    /// <summary>行首显式引用 marker 组之后的正文起点。</summary>
     private static int QuoteContentStart(string text)
     {
-        var index = 0;
-        while (index < text.Length)
-        {
-            var spaces = 0;
-            while (index < text.Length && spaces < 3 && text[index] == ' ')
-            {
-                index++;
-                spaces++;
-            }
-
-            if (index >= text.Length || text[index] != '>')
-            {
-                break;
-            }
-
-            index++;
-            if (index < text.Length && (text[index] == ' ' || text[index] == '\t'))
-            {
-                index++;
-            }
-        }
-
-        return index;
+        var markers = MarkdownQuoteNormalization.EnumerateMarkers(text, 0, text.Length);
+        return markers.Count == 0 ? 0 : markers[^1].End;
     }
 
     private static bool IsQuoteLineEmpty(string text, int contentStart)
@@ -274,16 +248,5 @@ public sealed partial class MarkdownTextBox
         }
 
         return true;
-    }
-
-    private static string RepeatQuotePrefix(int level)
-    {
-        var buffer = new System.Text.StringBuilder(level * 2);
-        for (var index = 0; index < level; index++)
-        {
-            buffer.Append("> ");
-        }
-
-        return buffer.ToString();
     }
 }

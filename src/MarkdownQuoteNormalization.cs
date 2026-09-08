@@ -9,6 +9,38 @@ namespace PaperTodo;
 /// </summary>
 internal static class MarkdownQuoteNormalization
 {
+    /// <summary>扫描 [start,end) 内行首连续引用 marker（每段前最多 3 空格、`&gt;` 后可跟一空格/tab），返回绝对偏移区间。</summary>
+    internal static IReadOnlyList<(int Start, int End)> EnumerateMarkers(string source, int start, int end)
+    {
+        var markers = new List<(int, int)>();
+        var index = start;
+        while (index < end)
+        {
+            var spaces = 0;
+            while (index < end && spaces < 3 && source[index] == ' ')
+            {
+                index++;
+                spaces++;
+            }
+
+            if (index >= end || source[index] != '>')
+            {
+                break;
+            }
+
+            var markerStart = index;
+            index++;
+            if (index < end && source[index] is ' ' or '\t')
+            {
+                index++;
+            }
+
+            markers.Add((markerStart, index));
+        }
+
+        return markers;
+    }
+
     /// <summary>
     /// 计算把 source 中「显式 `&gt;` 为 0 但语义 QuoteLevel&gt;0」的惰性续行提升到其引用层级所需的
     /// 前缀插入（按插入点升序）。保守策略：只补无显式 marker 的行——已有 ≥1 个 `&gt;` 是用户手写
@@ -40,32 +72,7 @@ internal static class MarkdownQuoteNormalization
                 continue;
             }
 
-            // 行首最多 3 空格后的显式 marker 计数（与 Blocks.ExplicitQuoteMarkers 同规则）。
-            var markerCount = 0;
-            var index = lineStart;
-            while (index < lineEnd)
-            {
-                var spaces = 0;
-                while (index < lineEnd && spaces < 3 && source[index] == ' ')
-                {
-                    index++;
-                    spaces++;
-                }
-
-                if (index >= lineEnd || source[index] != '>')
-                {
-                    break;
-                }
-
-                markerCount++;
-                index++;
-                if (index < lineEnd && (source[index] == ' ' || source[index] == '\t'))
-                {
-                    index++;
-                }
-            }
-
-            if (markerCount != 0)
+            if (EnumerateMarkers(source, lineStart, lineEnd).Count != 0)
             {
                 continue; // 已有显式 marker：视为用户手写结构，不自动改写。
             }
@@ -86,7 +93,7 @@ internal static class MarkdownQuoteNormalization
         return edits;
     }
 
-    private static string RepeatMarkerPrefix(int level)
+    internal static string RepeatMarkerPrefix(int level)
     {
         var buffer = new System.Text.StringBuilder(level * 2);
         for (var index = 0; index < level; index++)

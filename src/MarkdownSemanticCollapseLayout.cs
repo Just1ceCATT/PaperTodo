@@ -475,29 +475,6 @@ internal static class MarkdownSemanticCollapseLayout
         return Math.Max(0, ~index - 1);
     }
 
-    internal static int[] BuildLineStarts(string source)
-    {
-        var starts = new List<int>(Math.Max(1, source.Length / 32)) { 0 };
-        for (var index = 0; index < source.Length; index++)
-        {
-            if (source[index] == '\r')
-            {
-                if (index + 1 < source.Length && source[index + 1] == '\n')
-                {
-                    index++;
-                }
-
-                starts.Add(index + 1);
-            }
-            else if (source[index] == '\n')
-            {
-                starts.Add(index + 1);
-            }
-        }
-
-        return starts.ToArray();
-    }
-
     /// <summary>有序 spans 中首个 Start&gt;=offset 的下标（供按窗口 [start,end) 取 span 切片）。</summary>
     internal static int LowerBoundSpanStart(IReadOnlyList<MarkdownSemanticSpan> spans, int offset)
     {
@@ -597,6 +574,34 @@ internal sealed class MarkdownCollapseTable
     /// <summary>当前静态候选（仅供 oracle 测试与诊断：与 BuildCandidates 归一化后应逐元素相等）。</summary>
     internal IReadOnlyList<MarkdownCollapseCandidate> Candidates => _candidates;
 
+    /// <summary>
+    /// 按 origin 的 Length>0 分流，把每个候选对应的 span/link 映射到候选索引。两个 Dictionary
+    /// 必恰好覆盖全部候选——默认 span/link 的 Length==0，不可能是任何候选。
+    /// </summary>
+    private static (
+        Dictionary<MarkdownSemanticSpan, int> spanIndex,
+        Dictionary<MarkdownSemanticLink, int> linkIndex)
+        BuildOriginIndices(
+            List<MarkdownCollapseCandidate> candidates,
+            List<MarkdownSemanticSpan> spanOrigins,
+            List<MarkdownSemanticLink> linkOrigins)
+    {
+        var spanIndex = new Dictionary<MarkdownSemanticSpan, int>(candidates.Count);
+        var linkIndex = new Dictionary<MarkdownSemanticLink, int>(candidates.Count);
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            if (spanOrigins[index].Length > 0)
+            {
+                spanIndex[spanOrigins[index]] = index;
+            }
+            else
+            {
+                linkIndex[linkOrigins[index]] = index;
+            }
+        }
+        return (spanIndex, linkIndex);
+    }
+
     /// <summary>整篇重建一张表（首次进入 Full / rebase 不可行时回退调用）。行起点表直接取 snapshot 携带的。</summary>
     public static MarkdownCollapseTable Build(
         MarkdownSemanticSnapshot snapshot,
@@ -612,20 +617,7 @@ internal sealed class MarkdownCollapseTable
             snapshot, text, lineStarts, candidates, spanOrigins, linkOrigins,
             0, snapshot.Spans.Count, 0, snapshot.Links.Count);
 
-        var spanIndex = new Dictionary<MarkdownSemanticSpan, int>(candidates.Count);
-        var linkIndex = new Dictionary<MarkdownSemanticLink, int>(candidates.Count);
-        for (var index = 0; index < candidates.Count; index++)
-        {
-            // 候选必有非默认 origin（默认 span/link 的 Length==0，不可能是任何候选）。
-            if (spanOrigins[index].Length > 0)
-            {
-                spanIndex[spanOrigins[index]] = index;
-            }
-            else
-            {
-                linkIndex[linkOrigins[index]] = index;
-            }
-        }
+        var (spanIndex, linkIndex) = BuildOriginIndices(candidates, spanOrigins, linkOrigins);
 
         var array = candidates.Count == 0
             ? Array.Empty<MarkdownCollapseCandidate>()
@@ -715,20 +707,7 @@ internal sealed class MarkdownCollapseTable
             spanFrom, spanTo, linkFrom, linkTo);
 
         // origin → 候选索引（与 Build 同法）。
-        var spanIndex = new Dictionary<MarkdownSemanticSpan, int>(candidates.Count);
-        var linkIndex = new Dictionary<MarkdownSemanticLink, int>(candidates.Count);
-        for (var index = 0; index < candidates.Count; index++)
-        {
-            // 候选必有非默认 origin（默认 span/link 的 Length==0，不可能是任何候选）。
-            if (spanOrigins[index].Length > 0)
-            {
-                spanIndex[spanOrigins[index]] = index;
-            }
-            else
-            {
-                linkIndex[linkOrigins[index]] = index;
-            }
-        }
+        var (spanIndex, linkIndex) = BuildOriginIndices(candidates, spanOrigins, linkOrigins);
 
         var array = candidates.Count == 0
             ? Array.Empty<MarkdownCollapseCandidate>()
@@ -960,7 +939,7 @@ internal sealed class MarkdownCollapseTable
         return low;
     }
 
-    /// <summary>该光标下某行已显灵的引用 `&gt;` 单元数（前导连续 `&gt;`，行首≤3空格）。</summary>
+    /// <summary>该光标下某行已显灵的引用 `&gt;` 单元数。</summary>
     private int QuoteCellCount(MarkdownCaretReveal caret, int line)
     {
         if (!caret.Active || line < 0 || line >= _lineStarts.Length)
@@ -970,31 +949,12 @@ internal sealed class MarkdownCollapseTable
 
         var lineStart = _lineStarts[line];
         var lineEnd = line + 1 < _lineStarts.Length ? _lineStarts[line + 1] : _source.Length;
-        var index = lineStart;
         var revealed = 0;
-        while (index < lineEnd)
+        foreach (var marker in MarkdownQuoteNormalization.EnumerateMarkers(_source, lineStart, lineEnd))
         {
-            var spaces = 0;
-            while (index < lineEnd && spaces < 3 && _source[index] == ' ')
-            {
-                index++;
-                spaces++;
-            }
-
-            if (index >= lineEnd || _source[index] != '>')
-            {
-                break;
-            }
-
-            if (caret.CaretOffset >= index)
+            if (caret.CaretOffset >= marker.Start)
             {
                 revealed++;
-            }
-
-            index++;
-            if (index < lineEnd && (_source[index] is ' ' or '\t'))
-            {
-                index++;
             }
         }
 
