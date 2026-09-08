@@ -14,6 +14,8 @@ public sealed partial class AppController
 
     private void RefreshSettingsWindowContent()
     {
+        RefreshPluginPopupThemeForSettingsRefresh();
+
         if (_settingsWindow is not { } window)
         {
             return;
@@ -146,7 +148,7 @@ public sealed partial class AppController
 
             if (!previousWorkArea.Equals(WindowWorkAreaHelper.WorkAreaFor(window)))
             {
-                ApplySettingsSidebarFrame(window);
+                RefreshSettingsSidebarAfterMonitorChange(window);
             }
         };
 
@@ -410,8 +412,7 @@ public sealed partial class AppController
     private void ApplySettingsSidebarFrame(Window window)
     {
         var workArea = WindowWorkAreaHelper.WorkAreaFor(window);
-        var targetWidth = Math.Min(840, Math.Max(360, workArea.Width - 48));
-        var targetHeight = Math.Min(620, Math.Max(320, workArea.Height - 48));
+        var (targetWidth, targetHeight) = SettingsSidebarSizeForWorkArea(workArea);
 
         var wasVisible = window.IsVisible;
         var oldLeft = window.Left;
