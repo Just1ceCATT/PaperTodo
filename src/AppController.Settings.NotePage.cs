@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -17,7 +18,29 @@ public sealed partial class AppController
         content.Children.Add(WrapWithHint(
             SettingsFieldLabel(Strings.Get("TrayMarkdownRenderMode")),
             "TipMarkdownRender"));
-        content.Children.Add(CreateMarkdownRenderSegmentSelector());
+
+        UIElement? markdownAnimationRow = null;
+        content.Children.Add(CreateSettingsSidebarMarkdownRenderSelector(isFullRender =>
+        {
+            if (markdownAnimationRow != null)
+            {
+                markdownAnimationRow.Visibility = isFullRender
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }));
+
+        markdownAnimationRow = WrapWithHint(
+            SettingsToggle(
+                Strings.Get("SettingsMarkdownEditAnimation"),
+                State.MarkdownEditAnimationEnabled,
+                ToggleMarkdownEditAnimation),
+            "TipMarkdownEditAnimation");
+        markdownAnimationRow.Visibility =
+            State.MarkdownRenderMode == MarkdownRenderModes.Full
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        content.Children.Add(markdownAnimationRow);
 
         content.Children.Add(SettingsSectionLabel(Strings.Get("SettingsExternalOpen")));
         content.Children.Add(WrapWithHint(
@@ -64,9 +87,43 @@ public sealed partial class AppController
             RestoreSettingsSidebarNoteDefaults);
     }
 
+    private UIElement CreateSettingsSidebarMarkdownRenderSelector(
+        Action<bool> onFullModeChanged)
+    {
+        var segments = new[]
+        {
+            (MarkdownRenderModes.Off, Strings.Get("MarkdownRenderOff")),
+            (MarkdownRenderModes.Basic, Strings.Get("MarkdownRenderBasic")),
+            (MarkdownRenderModes.Enhanced, Strings.Get("MarkdownRenderEnhanced")),
+            (MarkdownRenderModes.Full, Strings.Get("MarkdownRenderFull"))
+        };
+
+        return CreateSegmentSelector(
+            segments,
+            State.MarkdownRenderMode,
+            mode =>
+            {
+                SetMarkdownRenderMode(mode);
+                onFullModeChanged(
+                    State.MarkdownRenderMode == MarkdownRenderModes.Full);
+            });
+    }
+
+    private void ToggleMarkdownEditAnimation()
+    {
+        State.MarkdownEditAnimationEnabled = !State.MarkdownEditAnimationEnabled;
+        SaveNow();
+
+        foreach (var window in _windows.Values)
+        {
+            window.UpdateMarkdownEditAnimation();
+        }
+    }
+
     private void RestoreSettingsSidebarNoteDefaults()
     {
         State.MarkdownRenderMode = MarkdownRenderModes.Enhanced;
+        State.MarkdownEditAnimationEnabled = true;
         State.ExternalMarkdownExtension = ExternalMarkdownFileExtensions.Default;
         State.AutoCompressLargeImages = true;
         State.UsePersistentPowerShellProcess = false;
@@ -78,6 +135,7 @@ public sealed partial class AppController
         foreach (var window in _windows.Values)
         {
             window.UpdateMarkdownRenderMode();
+            window.UpdateMarkdownEditAnimation();
             window.UpdateExternalMarkdownExtension();
         }
 
