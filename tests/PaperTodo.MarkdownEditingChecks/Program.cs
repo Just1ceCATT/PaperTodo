@@ -59,6 +59,60 @@ internal static partial class Program
             Equal("> a\n> b", editor.Box.Text, "one undo removes the newline and prefix");
         });
 
+        Check("Rendered task checkbox toggles source with independent undo steps", () =>
+        {
+            const string source = "- [ ] todo\n\nplain";
+            using var editor = new Editor(source);
+            var box = editor.Box;
+            box.SetPreviewMode(true);
+            Pump();
+            var point = TaskCheckBoxCenter(box);
+
+            Require(box.TryToggleRenderedTaskCheckBoxAtPoint(point), "unchecked rendered task activates");
+            Pump();
+            Equal("- [x] todo\n\nplain", box.Text, "first click checks the Markdown marker");
+
+            Require(box.TryToggleRenderedTaskCheckBoxAtPoint(point), "checked rendered task activates");
+            Pump();
+            Equal(source, box.Text, "second click unchecks the Markdown marker");
+
+            box.Undo();
+            Pump();
+            Equal("- [x] todo\n\nplain", box.Text, "one undo restores the previous checked state");
+            box.Undo();
+            Pump();
+            Equal(source, box.Text, "second undo restores the original unchecked state");
+            Require(!box.CanUndo, "rendered task clicks add no extra undo operations");
+        });
+
+        Check("Rendered task checkbox only activates while the Full marker is rendered", () =>
+        {
+            const string source = "- [ ] todo\n\nplain";
+            using var editor = new Editor(source);
+            var box = editor.Box;
+            box.SetPreviewMode(true);
+            Pump();
+            var point = TaskCheckBoxCenter(box);
+
+            box.SetMarkdownRenderMode(MarkdownRenderModes.Enhanced);
+            Pump();
+            Require(!box.TryToggleRenderedTaskCheckBoxAtPoint(point), "Enhanced mode has no rendered task interaction");
+            Equal(source, box.Text, "Enhanced mode leaves source untouched");
+
+            box.SetMarkdownRenderMode(MarkdownRenderModes.Full);
+            box.SetPreviewMode(false);
+            box.CaretOffset = source.IndexOf("todo", StringComparison.Ordinal);
+            Pump();
+            Require(!box.TryToggleRenderedTaskCheckBoxAtPoint(point), "revealed Full task marker stays normal source text");
+            Equal(source, box.Text, "revealed marker leaves source untouched");
+
+            box.SetPreviewMode(true);
+            Pump();
+            Require(box.TryToggleRenderedTaskCheckBoxAtPoint(point), "Full preview renders an activatable task checkbox");
+            Pump();
+            Equal("- [x] todo\n\nplain", box.Text, "Full preview activation updates the source");
+        });
+
         Check("WPF collapse restores link and emphasis widths after editing", () =>
         {
             foreach (var syntax in new[] {
@@ -198,6 +252,30 @@ internal static partial class Program
             for (var index = 1; index < expected.Count; index++)
                 Require(expected[index - 1].End <= expected[index].Start, $"collapse cells do not overlap at {caret.CaretOffset}");
         }
+    }
+
+    private static Point TaskCheckBoxCenter(MarkdownTextBox box)
+    {
+        box.ApplyTemplate();
+        box.Measure(new Size(800, 600));
+        box.Arrange(new Rect(0, 0, 800, 600));
+        box.UpdateLayout();
+        var view = box.TextArea.TextView;
+        view.Measure(new Size(800, 600));
+        view.Arrange(new Rect(0, 0, 800, 600));
+        view.EnsureVisualLines();
+
+        var snapshot = MarkdownSemanticSnapshot.Parse(box.Text);
+        var tasks = snapshot.Spans
+            .Where(span => span.Kind == MarkdownSemanticSpanKind.TaskListMarker)
+            .ToArray();
+        Equal(1, tasks.Length, "task checkbox test fixture marker count");
+        var task = tasks[0];
+        var line = box.Document.GetLineByOffset(task.Start);
+        Require(
+            MarkdownTaskCheckBoxGeometry.TryGetRect(view, line, task, out var rect),
+            "task checkbox geometry resolves");
+        return new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
     }
 
     private static byte ForegroundAlphaAtOffset(MarkdownTextBox box, int offset)
