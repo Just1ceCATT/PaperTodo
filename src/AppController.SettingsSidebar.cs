@@ -1,0 +1,441 @@
+using System;
+using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+
+namespace PaperTodo;
+
+public sealed partial class AppController
+{
+    private readonly Dictionary<SettingsPage, double> _settingsPageScrollOffsets = new();
+
+    private void RefreshSettingsWindowContent()
+    {
+        RefreshPluginPopupThemeForSettingsRefresh();
+
+        if (_settingsWindow is not { } window)
+        {
+            return;
+        }
+
+        // Focus loss after detaching the old tree is deferred. Commit the active editor
+        // before its replacement reads State, so a theme/display refresh keeps the draft.
+        // Unfocused editors may still show values superseded by a page-defaults restore.
+        if (_settingsExternalMarkdownTextBox is { IsKeyboardFocusWithin: true } editor)
+        {
+            CommitExternalMarkdownExtension(editor);
+        }
+
+        // The viewer belongs to the page that was displayed before navigation or refresh.
+        // A tree rebuilt again before Loaded has not restored its saved offset yet.
+        if (_settingsPageScrollViewerPage is { } displayedPage &&
+            _settingsPageScrollViewer is { IsLoaded: true } previousViewer)
+        {
+            _settingsPageScrollOffsets[displayedPage] = previousViewer.VerticalOffset;
+        }
+
+        if (!State.AdvancedSettingsMode && _settingsPage == SettingsPage.Labs)
+        {
+            _settingsPage = SettingsPage.General;
+            _shortcutRecordingCommandId = null;
+            ClearShortcutApplyFailure();
+        }
+        if (SupportsShortcutRecording(_settingsPage))
+        {
+            EnsureShortcutDraft();
+        }
+
+        InvalidateSystemThemeCacheIfNeeded();
+        _settingsRegionRefreshers.Clear();
+        _pluginStatusRefreshers.Clear();
+        _settingsExternalMarkdownTextBox = null;
+        _settingsHidePapersFromTaskbarCheckBox = null;
+        _settingsHidePapersFromWindowSwitcherCheckBox = null;
+        _settingsCapsuleModeCheckBox = null;
+        _settingsDeepCapsuleModeCheckBox = null;
+        _settingsDeepCapsuleExpandedSlotCheckBox = null;
+        _settingsRememberDeepCapsuleExpandedPositionCheckBox = null;
+        _settingsCollapseExpandedDeepCapsuleOnClickCheckBox = null;
+        _settingsCapsuleCollapseAllCheckBox = null;
+
+        window.Title = Strings.Get("TraySettings");
+        window.SizeToContent = SizeToContent.Manual;
+        window.FontFamily = AppTypography.UiFontFamily;
+        window.FontSize = AppTypography.Scale(12);
+        window.Language = AppTypography.Language;
+        AppTypography.ApplyTextRendering(window);
+        window.Content = BuildSettingsSidebarWindowContent(window);
+        ApplyToolTipSetting(window);
+        ApplySettingsSidebarFrame(window);
+    }
+
+    private UIElement BuildSettingsSidebarWindowContent(Window window)
+    {
+        var frame = new Border
+        {
+            Background = TrayPaperBrush,
+            BorderBrush = TrayBorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            SnapsToDevicePixels = true
+        };
+
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var titleRow = BuildSettingsSidebarTitleRow(window);
+        Grid.SetRow(titleRow, 0);
+        root.Children.Add(titleRow);
+
+        var body = new Grid();
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(158) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(body, 1);
+        root.Children.Add(body);
+
+        var navigation = BuildSettingsSidebarNavigation();
+        Grid.SetColumn(navigation, 0);
+        body.Children.Add(navigation);
+
+        var separator = new Border
+        {
+            Background = TrayBorderBrush,
+            Opacity = 0.65
+        };
+        Grid.SetColumn(separator, 1);
+        body.Children.Add(separator);
+
+        var pageHost = BuildSettingsPageHost();
+        Grid.SetColumn(pageHost, 2);
+        body.Children.Add(pageHost);
+
+        frame.Child = root;
+        return frame;
+    }
+
+    private Grid BuildSettingsSidebarTitleRow(Window window)
+    {
+        var titleRow = new Grid
+        {
+            Height = 44,
+            Background = Brushes.Transparent,
+            Cursor = Cursors.SizeAll,
+            Margin = new Thickness(14, 4, 10, 0)
+        };
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleRow.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ChangedButton != MouseButton.Left)
+            {
+                return;
+            }
+
+            var previousWorkArea = WindowWorkAreaHelper.WorkAreaFor(window);
+            try
+            {
+                window.DragMove();
+            }
+            catch
+            {
+                // DragMove can throw if the button is released before WPF enters the move loop.
+            }
+
+            if (!previousWorkArea.Equals(WindowWorkAreaHelper.WorkAreaFor(window)))
+            {
+                RefreshSettingsSidebarAfterMonitorChange(window);
+            }
+        };
+
+        titleRow.Children.Add(new TextBlock
+        {
+            Text = Strings.Get("TraySettings"),
+            Foreground = TrayTextBrush,
+            FontSize = AppTypography.Scale(15),
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var closeButton = new Button
+        {
+            Content = "×",
+            Width = 28,
+            Height = 24,
+            Padding = new Thickness(0),
+            BorderThickness = new Thickness(1),
+            Background = Brushes.Transparent,
+            Foreground = TrayWeakTextBrush,
+            FontFamily = AppTypography.SymbolFontFamily,
+            FontSize = AppTypography.Scale(16),
+            Cursor = Cursors.Hand,
+            Focusable = false,
+            Style = BuildSettingsCloseButtonStyle()
+        };
+        closeButton.Click += (_, _) => window.Close();
+        Grid.SetColumn(closeButton, 1);
+        titleRow.Children.Add(closeButton);
+        return titleRow;
+    }
+
+    private UIElement BuildSettingsSidebarNavigation()
+    {
+        var root = new DockPanel
+        {
+            LastChildFill = true,
+            Background = Theme.Tint((byte)(Theme.IsDark ? 12 : 8)),
+            Margin = new Thickness(1, 0, 0, 1)
+        };
+
+        var footer = new StackPanel
+        {
+            Margin = new Thickness(12, 8, 12, 12)
+        };
+        footer.Children.Add(new Border
+        {
+            Height = 1,
+            Background = TrayBorderBrush,
+            Opacity = 0.55,
+            Margin = new Thickness(0, 0, 0, 8)
+        });
+
+        var advancedModeToggle = SettingsToggle(
+            Strings.Get("SettingsAdvancedMode"),
+            State.AdvancedSettingsMode,
+            ToggleAdvancedSettingsMode);
+        advancedModeToggle.FontSize = AppTypography.Scale(11.5);
+        advancedModeToggle.Margin = new Thickness(2, 2, 0, 0);
+        advancedModeToggle.ToolTip = BuildSettingsHintTooltip(Strings.Get("TipAdvancedSettingsMode"));
+        footer.Children.Add(advancedModeToggle);
+
+        footer.Children.Add(BuildSettingsSignature());
+        DockPanel.SetDock(footer, Dock.Bottom);
+        root.Children.Add(footer);
+
+        var navigationItems = new StackPanel
+        {
+            Margin = new Thickness(10, 10, 10, 0)
+        };
+        foreach (var page in SettingsPages())
+        {
+            navigationItems.Children.Add(BuildSettingsSidebarNavigationItem(page));
+        }
+        root.Children.Add(new ScrollViewer
+        {
+            Content = navigationItems,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            CanContentScroll = false,
+            PanningMode = PanningMode.VerticalOnly
+        });
+        return root;
+    }
+
+    private IEnumerable<SettingsPage> SettingsPages()
+    {
+        yield return SettingsPage.General;
+        yield return SettingsPage.Todo;
+        yield return SettingsPage.Note;
+        yield return SettingsPage.Visual;
+        yield return SettingsPage.Shortcuts;
+        yield return SettingsPage.Plugins;
+        if (State.AdvancedSettingsMode)
+        {
+            yield return SettingsPage.Labs;
+        }
+    }
+
+    private UIElement BuildSettingsSidebarNavigationItem(SettingsPage page)
+    {
+        var active = page == _settingsPage;
+        var border = new Border
+        {
+            Height = 34,
+            CornerRadius = new CornerRadius(6),
+            Background = active
+                ? Theme.Tint((byte)(Theme.IsDark ? 34 : 18))
+                : Brushes.Transparent,
+            Cursor = Cursors.Hand,
+            Margin = new Thickness(0, 1, 0, 1)
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var indicator = new Border
+        {
+            Width = 3,
+            Height = 18,
+            CornerRadius = new CornerRadius(1.5),
+            Background = active ? Theme.ActiveBrush : Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(indicator, 0);
+        grid.Children.Add(indicator);
+
+        var label = new TextBlock
+        {
+            Text = SettingsPageLabel(page),
+            Foreground = active ? TrayTextBrush : TrayWeakTextBrush,
+            FontSize = AppTypography.Scale(12.5),
+            FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 8, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+        border.Child = grid;
+
+        border.MouseEnter += (_, _) =>
+        {
+            if (page != _settingsPage)
+            {
+                border.Background = TrayHoverBrush;
+                label.Foreground = TrayTextBrush;
+            }
+        };
+        border.MouseLeave += (_, _) =>
+        {
+            if (page != _settingsPage)
+            {
+                border.Background = Brushes.Transparent;
+                label.Foreground = TrayWeakTextBrush;
+            }
+        };
+        border.MouseLeftButtonDown += (_, e) =>
+        {
+            if (page != _settingsPage)
+            {
+                ShowSettingsWindow(page);
+            }
+            e.Handled = true;
+        };
+        return border;
+    }
+
+    private UIElement BuildSettingsPageHost()
+    {
+        var root = new DockPanel
+        {
+            LastChildFill = true,
+            Margin = new Thickness(16, 12, 10, 14)
+        };
+
+        var title = new TextBlock
+        {
+            Text = SettingsPageLabel(_settingsPage),
+            Foreground = TrayTextBrush,
+            FontSize = AppTypography.Scale(19),
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(8, 0, 8, 12)
+        };
+        DockPanel.SetDock(title, Dock.Top);
+        root.Children.Add(title);
+
+        // Advanced blocks extend their backgrounds 8 DIPs beyond the aligned controls.
+        // Keep that space inside the viewport so scrolling does not clip rounded borders.
+        var content = new Border
+        {
+            Width = SettingsContentWidth() + 16,
+            Padding = new Thickness(8, 0, 8, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = BuildSettingsPage()
+        };
+
+        var scrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            CanContentScroll = false,
+            PanningMode = PanningMode.Both,
+            Content = content
+        };
+        _settingsPageScrollViewer = scrollViewer;
+        _settingsPageScrollViewerPage = _settingsPage;
+        if (_settingsPageScrollOffsets.TryGetValue(_settingsPage, out var offset) && offset > 0)
+        {
+            scrollViewer.Loaded += (_, _) => scrollViewer.Dispatcher.BeginInvoke(
+                (Action)(() => scrollViewer.ScrollToVerticalOffset(
+                    Math.Min(offset, scrollViewer.ScrollableHeight))),
+                DispatcherPriority.ContextIdle);
+        }
+        root.Children.Add(scrollViewer);
+        return root;
+    }
+
+    private UIElement BuildSettingsPage() => _settingsPage switch
+    {
+        SettingsPage.General => BuildSettingsSidebarGeneralPage(),
+        SettingsPage.Todo => BuildSettingsSidebarTodoPage(),
+        SettingsPage.Note => BuildSettingsSidebarNotePage(),
+        SettingsPage.Visual => BuildVisualSettingsPage(),
+        SettingsPage.Shortcuts => BuildShortcutSettingsPage(),
+        SettingsPage.Plugins => BuildPluginsSettingsPage(),
+        SettingsPage.Labs => BuildLabsSettingsPage(),
+        _ => BuildSettingsSidebarGeneralPage()
+    };
+
+    private string SettingsPageLabel(SettingsPage page) => page switch
+    {
+        SettingsPage.General => SettingsSidebarLocalized(
+            "常规", "General", "一般", "일반"),
+        SettingsPage.Todo => Strings.Get("MenuTodo"),
+        SettingsPage.Note => Strings.Get("PaperKindNote"),
+        SettingsPage.Visual => Strings.Get("SettingsVisual"),
+        SettingsPage.Shortcuts => Strings.Get("SettingsShortcuts"),
+        SettingsPage.Plugins => Strings.Get("SettingsPlugins"),
+        SettingsPage.Labs => Strings.Get("SettingsLabs"),
+        _ => Strings.Get("TraySettings")
+    };
+
+    private static string SettingsSidebarLocalized(
+        string chinese,
+        string english,
+        string japanese,
+        string korean)
+    {
+        return UiLanguages.EffectiveUiCulture.TwoLetterISOLanguageName switch
+        {
+            "en" => english,
+            "ja" => japanese,
+            "ko" => korean,
+            _ => chinese
+        };
+    }
+
+    private void ApplySettingsSidebarFrame(Window window)
+    {
+        var workArea = WindowWorkAreaHelper.WorkAreaFor(window);
+        var (targetWidth, targetHeight) = SettingsSidebarSizeForWorkArea(workArea);
+
+        var wasVisible = window.IsVisible;
+        var oldLeft = window.Left;
+        var oldTop = window.Top;
+
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Width = targetWidth;
+        window.Height = targetHeight;
+
+        if (!wasVisible || !double.IsFinite(oldLeft) || !double.IsFinite(oldTop))
+        {
+            window.Left = workArea.Left + (workArea.Width - targetWidth) / 2;
+            window.Top = workArea.Top + (workArea.Height - targetHeight) / 2;
+            return;
+        }
+
+        window.Left = ClampWindowCoordinate(
+            oldLeft,
+            workArea.Left + 16,
+            workArea.Right - targetWidth - 16);
+        window.Top = ClampWindowCoordinate(
+            oldTop,
+            workArea.Top + 16,
+            workArea.Bottom - targetHeight - 16);
+    }
+}
