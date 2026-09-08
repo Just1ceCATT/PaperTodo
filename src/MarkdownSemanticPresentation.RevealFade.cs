@@ -156,6 +156,11 @@ internal sealed partial class MarkdownSemanticPresentation
             var lastLine = document.GetLineByOffset(Math.Max(minStart, maxEnd - 1));
             var length = lastLine.Offset + lastLine.TotalLength - firstLine.Offset;
             textView.Redraw(firstLine.Offset, length, DispatcherPriority.Render);
+            // 兜底：AvalonEdit 对范围 Redraw 的脏标记合并可能让跨行 range 的非 caret 端
+            // visualLine 漏掉一次按当前 _fadeAlpha 的重建，导致两端 `**` 笔刷 alpha 不同步
+            // （常见表现：非 caret 端像瞬显、caret 端跟着 alpha 走，肉眼一帧之差）。这里追加
+            // 一次全量 Render Redraw，保证跨行加粗等 range 的两端都与当前帧 alpha 对齐。
+            textView.Redraw(DispatcherPriority.Render);
             return;
         }
 
