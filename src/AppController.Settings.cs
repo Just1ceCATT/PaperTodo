@@ -2928,7 +2928,11 @@ public sealed partial class AppController
 
         var path = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
         path.Name = "CheckMark";
-        path.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 4,8.1 L 7,11 L 12,5"));
+        // Keep the original layout box stable so changing the geometry is a real one-DIP shift
+        // instead of being partly cancelled by Path natural-size re-centering at some DPI scales.
+        path.SetValue(FrameworkElement.WidthProperty, 13.0);
+        path.SetValue(FrameworkElement.HeightProperty, 12.0);
+        path.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 3,7.1 L 6,10 L 11,4"));
         path.SetValue(System.Windows.Shapes.Path.StrokeProperty, TrayPaperBrush);
         path.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 2.0);
         path.SetValue(System.Windows.Shapes.Path.StrokeStartLineCapProperty, PenLineCap.Round);
