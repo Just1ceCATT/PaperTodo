@@ -507,6 +507,7 @@ public sealed class AppState
     public bool UsePersistentPowerShellProcess { get; set; }
     public bool PreferPowerShell7 { get; set; } = true;
     public bool HideScriptRunWindow { get; set; } = true;
+    // Wire values: 0 = unlimited (legacy/default), -1 = show zero title characters.
     public int DeepCapsuleTitleMeasureCharacterLimit { get; set; }
     public Dictionary<string, string> GlobalHotkeys { get; set; } = new();
     public Dictionary<string, bool> GlobalHotkeyEnabled { get; set; } = new();

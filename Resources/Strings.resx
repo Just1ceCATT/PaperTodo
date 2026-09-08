@@ -1126,11 +1126,10 @@
     <value>边缘标题最大长度</value>
   </data>
   <data name="TipDeepCapsuleTitleMeasureLimit" xml:space="preserve">
-    <value>仅用标题前 N 个字符计算边缘胶囊宽度；标题本身不截断，普通胶囊不受影响。
-「全部」保持原有宽度。</value>
+    <value>限制静止时边缘胶囊显示的标题长度，0 隐藏标题文字但保留图标，不修改真实标题。加减可在「无限制、0、1…20」之间循环。关闭悬停预览时，鼠标移入会展开被截短的标题，移出后收回。</value>
   </data>
   <data name="SettingsAllCharacters" xml:space="preserve">
-    <value>全部</value>
+    <value>无限制</value>
   </data>
   <data name="ShortcutEnabledHeader" xml:space="preserve">
     <value>启用</value>

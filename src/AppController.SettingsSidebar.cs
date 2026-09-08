@@ -376,7 +376,7 @@ public sealed partial class AppController
         var root = new DockPanel
         {
             LastChildFill = true,
-            Margin = new Thickness(16, 0, 4, 14)
+            Margin = new Thickness(16, 0, 2, 14)
         };
 
         // Keep the page width static. Use the already-empty host edge as clipping room

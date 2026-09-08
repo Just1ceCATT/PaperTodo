@@ -3512,7 +3512,7 @@ public sealed partial class PaperWindow : Window
         var title = _controller.PaperCapsuleTitle(_paper);
         if (limitForDeepCapsule)
         {
-            title = LimitTextElements(title, _controller.State.DeepCapsuleTitleMeasureCharacterLimit);
+            title = EdgeCapsuleTitleLimit.TextForMeasure(title, _controller.State.DeepCapsuleTitleMeasureCharacterLimit);
         }
 
         return MeasureCapsuleTextWidth(
@@ -3521,17 +3521,6 @@ public sealed partial class PaperWindow : Window
             CapsuleLabelFontWeight,
             CapsuleLabelFontFamily,
             pixelsPerDip);
-    }
-
-    private static string LimitTextElements(string text, int limit)
-    {
-        if (limit <= 0 || string.IsNullOrEmpty(text))
-        {
-            return text;
-        }
-
-        var indexes = StringInfo.ParseCombiningCharacters(text);
-        return indexes.Length <= limit ? text : text[..indexes[limit]];
     }
 
     // The capsule icon glyph (✓ / ✎) is not a fixed box — its rendered advance width depends

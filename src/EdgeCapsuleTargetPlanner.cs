@@ -58,9 +58,10 @@ internal static class EdgeCapsuleTargetPlanner
         var visibleHeight = preview
             ? layout.PreviewHeightDip
             : layout.HeightDip;
+        var expandedWidth = Math.Max(layout.RestingWidthDip, layout.ExpandedWidthDip);
         var bodyWidth = preview
             ? Math.Max(1, layout.PreviewWidthDip - closeWidth)
-            : layout.RestingWidthDip;
+            : expanded ? expandedWidth : layout.RestingWidthDip;
         var geometry = EdgeCapsuleGeometry.Calculate(new EdgeCapsuleGeometryInput(
             layout.Monitor,
             layout.Edge,
@@ -73,8 +74,7 @@ internal static class EdgeCapsuleTargetPlanner
         // current monitor/DPI/edge and never shrinks it during that host
         // generation.
         var hostVisibleWidth = Math.Max(
-            layout.RestingWidthDip +
-                layout.MaximumCloseWidthDip,
+            expandedWidth + layout.MaximumCloseWidthDip,
             Math.Max(
                 layout.PreviewWidthDip,
                 layout.HostCapacityWidthDip));
@@ -125,7 +125,8 @@ internal static class EdgeCapsuleTargetPlanner
             !retracted && !dockedSuppressed &&
                 model.State.Visual == EdgeCapsuleVisualState.Active,
             hitTest,
-            preview ? false : layout.CloseSegmentActsAsContent);
+            preview ? false : layout.CloseSegmentActsAsContent,
+            !layout.HideRestingTitle || (expanded && expandedWidth > layout.RestingWidthDip));
 
         var floatingShape = ownsFloatingHost
             ? CreateFloatingShape(layout, model.State.Visual == EdgeCapsuleVisualState.Active)

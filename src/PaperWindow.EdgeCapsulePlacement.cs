@@ -12,7 +12,7 @@ public sealed partial class PaperWindow
         return DeepCapsuleVisibleWidth(DeepCapsuleSlotDpi().PixelsPerDip);
     }
 
-    private double DeepCapsuleVisibleWidth(double pixelsPerDip)
+    private double DeepCapsuleVisibleWidth(double pixelsPerDip, bool limitTitle = true)
     {
         var pluginContentWidth = PluginCapsuleRequestedContentWidth(pixelsPerDip);
         if (pluginContentWidth.HasValue)
@@ -27,7 +27,7 @@ public sealed partial class PaperWindow
             MeasureCapsuleIconWidth(pixelsPerDip) +
             CapsuleIconGap +
             MeasureCapsuleTitleWidth(
-                limitForDeepCapsule: true,
+                limitForDeepCapsule: limitTitle,
                 pixelsPerDip: pixelsPerDip) +
             CapsuleRightPadding);
         return Math.Max(34, bodyWidth + WindowChromeMargin);
@@ -35,7 +35,22 @@ public sealed partial class PaperWindow
 
     private double ExpandedDeepCapsuleVisibleWidth()
     {
-        return DeepCapsuleVisibleWidth() + CapsuleCloseWidth;
+        return DeepCapsuleExpandedBodyWidth(DeepCapsuleMonitorGeometry()) + CapsuleCloseWidth;
+    }
+
+    private double DeepCapsuleExpandedBodyWidth(MonitorGeometry monitor, double? restingWidth = null)
+    {
+        var resting = restingWidth ?? DeepCapsuleVisibleWidth(monitor.DpiScaleY);
+        if (_controller.State.ExperimentalEdgeCapsuleHoverPreview ||
+            _controller.State.DeepCapsuleTitleMeasureCharacterLimit == EdgeCapsuleTitleLimit.Unlimited)
+        {
+            return resting;
+        }
+
+        // Only the ordinary text capsule grows. Plugin-requested content retains its own width.
+        var full = DeepCapsuleVisibleWidth(monitor.DpiScaleY, limitTitle: false);
+        return Math.Clamp(full, resting,
+            Math.Max(resting, monitor.LocalWorkAreaDip.Width - CapsuleCloseWidth));
     }
 
     // Slide this capsule up to the master's slot and fade it out. The window stays shown

@@ -1113,11 +1113,10 @@ papertodo と PaperTodo_Bold（.ttf/.otf）の両方を置いてください。<
     <value>エッジタイトルの最大長</value>
   </data>
   <data name="TipDeepCapsuleTitleMeasureLimit" xml:space="preserve">
-    <value>タイトル先頭 N 文字だけでエッジカプセル幅を測ります。タイトル自体は切らず、通常カプセルには影響しません。
-「すべて」は従来どおりの幅です。</value>
+    <value>静止時のエッジカプセルのタイトル長を制限します。0 は文字のみ非表示にし、アイコンと保存済みタイトルは保持します。＋／−で「無制限、0、1…20」を循環します。ホバープレビューがオフの場合、ホバーで省略されたタイトルを広げ、離れると戻します。</value>
   </data>
   <data name="SettingsAllCharacters" xml:space="preserve">
-    <value>すべて</value>
+    <value>無制限</value>
   </data>
   <data name="ShortcutEnabledHeader" xml:space="preserve">
     <value>有効</value>
