@@ -276,7 +276,6 @@ public sealed partial class PaperWindow
                 // while transparent, before exposing the first expand frame.
                 RefreshCapsuleLabel();
                 UpdateLayout();
-                TracePaperFormGeometry("bootstrap-ready");
             });
         }
         finally
