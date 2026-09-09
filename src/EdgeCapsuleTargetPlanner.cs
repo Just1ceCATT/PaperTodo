@@ -51,16 +51,26 @@ internal static class EdgeCapsuleTargetPlanner
                 EdgeCapsuleVisualState.Active);
         var top = model.DockedDragTopDipOverride ??
             (retracted ? layout.MasterTopDip : layout.NormalTopDip);
-        var closeWidth =
-            preview || expanded
-                ? layout.MaximumCloseWidthDip
-                : 0;
+
+        // "Hide close button on hover" means there is no close segment at all. Keeping an empty
+        // segment would leave an invisible but still reserved strip on the inner edge of the pill.
+        var closeSegmentVisible =
+            (preview || expanded) &&
+            !layout.CloseSegmentActsAsContent;
+        var closeWidth = closeSegmentVisible
+            ? layout.MaximumCloseWidthDip
+            : 0;
         var visibleHeight = preview
             ? layout.PreviewHeightDip
             : layout.HeightDip;
         var expandedWidth = Math.Max(layout.RestingWidthDip, layout.ExpandedWidthDip);
+        // PreviewWidthDip is the old total envelope (body + possible close strip). Keep the body
+        // width stable and remove only the close strip when that setting hides it.
+        var previewBodyWidth = Math.Max(
+            1,
+            layout.PreviewWidthDip - layout.MaximumCloseWidthDip);
         var bodyWidth = preview
-            ? Math.Max(1, layout.PreviewWidthDip - closeWidth)
+            ? previewBodyWidth
             : expanded ? expandedWidth : layout.RestingWidthDip;
         var geometry = EdgeCapsuleGeometry.Calculate(new EdgeCapsuleGeometryInput(
             layout.Monitor,
@@ -125,7 +135,7 @@ internal static class EdgeCapsuleTargetPlanner
             !retracted && !dockedSuppressed &&
                 model.State.Visual == EdgeCapsuleVisualState.Active,
             hitTest,
-            preview ? false : layout.CloseSegmentActsAsContent,
+            false,
             !layout.HideRestingTitle || (expanded && expandedWidth > layout.RestingWidthDip));
 
         var floatingShape = ownsFloatingHost
