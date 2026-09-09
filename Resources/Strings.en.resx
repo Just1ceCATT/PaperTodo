@@ -1113,11 +1113,10 @@ Per-note percentage zoom stacks on top.</value>
     <value>Edge title max length</value>
   </data>
   <data name="TipDeepCapsuleTitleMeasureLimit" xml:space="preserve">
-    <value>Measure edge capsule width from the first N title characters only; the title is not truncated and normal capsules are unchanged.
-“All” keeps the previous width behavior.</value>
+    <value>Limit the title shown by resting edge capsules. 0 hides the title but keeps the icon and stored title. Plus/minus cycle through Unlimited, 0, 1…20. With hover preview off, hovering reveals a shortened title; leaving restores the limit.</value>
   </data>
   <data name="SettingsAllCharacters" xml:space="preserve">
-    <value>All</value>
+    <value>Unlimited</value>
   </data>
   <data name="ShortcutEnabledHeader" xml:space="preserve">
     <value>On</value>

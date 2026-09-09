@@ -57,5 +57,8 @@ jobs:
       - name: Todo navigation checks
         run: dotnet run --project .\tests\PaperTodo.TodoNavigationChecks\PaperTodo.TodoNavigationChecks.csproj -c Release
 
+      - name: Edge title checks
+        run: dotnet run --project .\tests\PaperTodo.EdgeTitleChecks\PaperTodo.EdgeTitleChecks.csproj -c Release
+
       - name: Threading regression checks
         run: dotnet run --project .\tests\PaperTodo.ThreadingChecks\PaperTodo.ThreadingChecks.csproj -c Release

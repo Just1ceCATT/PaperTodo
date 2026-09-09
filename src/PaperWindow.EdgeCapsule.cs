@@ -411,6 +411,7 @@ public sealed partial class PaperWindow
         var edge = MyDeepCapsuleEdge;
         var restingWidth =
             DeepCapsuleVisibleWidth(monitor.DpiScaleY);
+        var expandedWidth = DeepCapsuleExpandedBodyWidth(monitor, restingWidth);
         var previewSize = CurrentEdgeCapsulePreviewSize;
         var previewWidth = previewSize?.WidthDip ??
             restingWidth + CapsuleCloseWidth;
@@ -426,7 +427,7 @@ public sealed partial class PaperWindow
                 monitor,
                 edge,
                 Math.Max(
-                    restingWidth + CapsuleCloseWidth,
+                    expandedWidth + CapsuleCloseWidth,
                     previewWidth),
                 Math.Max(
                     PaperLayoutDefaults.CapsuleHeight,
@@ -467,7 +468,9 @@ public sealed partial class PaperWindow
                 restingOpacity,
                 forcedOpacity,
                 _edgeCapsuleHostCapacityWidthDip,
-                _edgeCapsuleHostCapacityHeightDip));
+                _edgeCapsuleHostCapacityHeightDip,
+                expandedWidth,
+                _controller.State.DeepCapsuleTitleMeasureCharacterLimit == EdgeCapsuleTitleLimit.Hidden));
     }
 
     private bool ApplyEdgeCapsulePresentationFrame(

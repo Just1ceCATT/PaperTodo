@@ -1464,31 +1464,22 @@ public sealed partial class AppController
     private UIElement CreateDeepCapsuleTitleMeasureLimitStepper() =>
         CreateSettingsStepper(
             DeepCapsuleTitleMeasureLimitText,
-            () =>
-            {
-                var current = State.DeepCapsuleTitleMeasureCharacterLimit;
-                SetDeepCapsuleTitleMeasureCharacterLimit(
-                    current == 0 ? PaperTitles.MaxConfigurableTitleLength : current - 1);
-            },
-            () =>
-            {
-                var current = State.DeepCapsuleTitleMeasureCharacterLimit;
-                SetDeepCapsuleTitleMeasureCharacterLimit(
-                    current == 0
-                        ? 0
-                        : current >= PaperTitles.MaxConfigurableTitleLength ? 0 : current + 1);
-            });
+            () => SetDeepCapsuleTitleMeasureCharacterLimit(EdgeCapsuleTitleLimit.Step(
+                State.DeepCapsuleTitleMeasureCharacterLimit, increase: false)),
+            () => SetDeepCapsuleTitleMeasureCharacterLimit(EdgeCapsuleTitleLimit.Step(
+                State.DeepCapsuleTitleMeasureCharacterLimit, increase: true)));
 
     private string DeepCapsuleTitleMeasureLimitText()
     {
-        return State.DeepCapsuleTitleMeasureCharacterLimit == 0
+        var limit = State.DeepCapsuleTitleMeasureCharacterLimit;
+        return limit == EdgeCapsuleTitleLimit.Unlimited
             ? Strings.Get("SettingsAllCharacters")
-            : State.DeepCapsuleTitleMeasureCharacterLimit.ToString(CultureInfo.InvariantCulture);
+            : (limit == EdgeCapsuleTitleLimit.Hidden ? 0 : limit).ToString(CultureInfo.InvariantCulture);
     }
 
     private void SetDeepCapsuleTitleMeasureCharacterLimit(int value)
     {
-        var normalized = Math.Clamp(value, 0, PaperTitles.MaxConfigurableTitleLength);
+        var normalized = EdgeCapsuleTitleLimit.Normalize(value);
         if (State.DeepCapsuleTitleMeasureCharacterLimit == normalized)
         {
             return;

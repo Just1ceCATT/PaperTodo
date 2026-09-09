@@ -361,8 +361,9 @@ public sealed partial class AppController
         SaveNow();
         if (!State.ExperimentalEdgeCapsuleHoverPreview)
         {
-            CloseEdgeCapsulePreview(animate: false, arrange: true);
+            CloseEdgeCapsulePreview(animate: false, arrange: false);
         }
+        ArrangeDeepCapsules(animate: false);
         RefreshEdgeCapsuleHoverIntentRuntime();
         RefreshSettingsRegions("labs.edgePreviewIntent");
     }
