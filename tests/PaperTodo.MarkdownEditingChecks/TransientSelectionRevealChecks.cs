@@ -11,7 +11,7 @@ internal static class TransientSelectionRevealChecks
     internal static void Run()
     {
         CheckCollapsedSourceRevealIsScoped();
-        CheckWrappedSelectionScrollsToExactColumn();
+        CheckWrappedSelectionKeepsExactColumn();
         Console.WriteLine("PASS transient find reveal");
     }
 
@@ -50,22 +50,18 @@ internal static class TransientSelectionRevealChecks
             "clearing find reveal restores normal Full preview layout");
     }
 
-    private static void CheckWrappedSelectionScrollsToExactColumn()
+    private static void CheckWrappedSelectionKeepsExactColumn()
     {
         var source = string.Join(" ", Enumerable.Repeat("wrapped", 80)) + " needle";
         using var editor = new PreviewEditor(source, width: 180, height: 90);
         editor.Layout();
 
         var needleOffset = source.LastIndexOf("needle", StringComparison.Ordinal);
-        PaperWindow.ScrollBuiltInFindOffsetIntoView(editor.Box, needleOffset);
-        Pump();
-        editor.Box.UpdateLayout();
-        editor.Box.TextArea.TextView.EnsureVisualLines();
-
-        if (editor.Box.TextArea.TextView.VerticalOffset <= 0.5)
+        var target = PaperWindow.GetBuiltInFindScrollTarget(editor.Box, needleOffset);
+        if (target.Line != 1 || target.Column != needleOffset + 1)
         {
             throw new InvalidOperationException(
-                "FAIL transient find reveal: exact-column scroll stayed at the physical line start");
+                $"FAIL transient find reveal: exact scroll target {target.Line}:{target.Column} != 1:{needleOffset + 1}");
         }
     }
 
