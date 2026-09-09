@@ -12,7 +12,7 @@ internal static class TransientSelectionRevealChecks
     {
         CheckCollapsedSourceRevealIsScoped();
         CheckWrappedSelectionScrollsToExactColumn();
-        Console.WriteLine("PASS transient selection reveal");
+        Console.WriteLine("PASS transient find reveal");
     }
 
     private static void CheckCollapsedSourceRevealIsScoped()
@@ -25,31 +25,29 @@ internal static class TransientSelectionRevealChecks
         var initialTailX = XAtOffset(editor.Box, tailOffset);
 
         var labelOffset = source.IndexOf("label", StringComparison.Ordinal);
-        editor.Box.Select(labelOffset, "label".Length);
-        editor.Box.SetTransientSelectionRevealActive(true);
+        editor.Presentation.SetTransientFindReveal(labelOffset, "label".Length);
         editor.Layout();
         Near(
             initialTailX,
             XAtOffset(editor.Box, tailOffset),
-            "selecting visible link text does not expand hidden syntax");
+            "visible link text does not expand hidden syntax");
 
         var needleOffset = source.IndexOf("needle", StringComparison.Ordinal);
-        editor.Box.Select(needleOffset, "needle".Length);
-        editor.Box.SetTransientSelectionRevealActive(true);
+        editor.Presentation.SetTransientFindReveal(needleOffset, "needle".Length);
         editor.Layout();
         var revealedTailX = XAtOffset(editor.Box, tailOffset);
         if (revealedTailX <= initialTailX + 20)
         {
             throw new InvalidOperationException(
-                $"FAIL transient selection reveal: hidden link destination did not expand: {initialTailX:F2} -> {revealedTailX:F2}");
+                $"FAIL transient find reveal: hidden link destination did not expand: {initialTailX:F2} -> {revealedTailX:F2}");
         }
 
-        editor.Box.SetTransientSelectionRevealActive(false);
+        editor.Presentation.SetTransientFindReveal(null, 0);
         editor.Layout();
         Near(
             initialTailX,
             XAtOffset(editor.Box, tailOffset),
-            "closing transient reveal restores normal Full preview layout");
+            "clearing find reveal restores normal Full preview layout");
     }
 
     private static void CheckWrappedSelectionScrollsToExactColumn()
@@ -59,8 +57,7 @@ internal static class TransientSelectionRevealChecks
         editor.Layout();
 
         var needleOffset = source.LastIndexOf("needle", StringComparison.Ordinal);
-        editor.Box.Select(needleOffset, "needle".Length);
-        editor.Box.SetTransientSelectionRevealActive(true);
+        PaperWindow.ScrollBuiltInFindOffsetIntoView(editor.Box, needleOffset);
         Pump();
         editor.Box.UpdateLayout();
         editor.Box.TextArea.TextView.EnsureVisualLines();
@@ -68,7 +65,7 @@ internal static class TransientSelectionRevealChecks
         if (editor.Box.TextArea.TextView.VerticalOffset <= 0.5)
         {
             throw new InvalidOperationException(
-                "FAIL transient selection reveal: wrapped match stayed at the physical line start");
+                "FAIL transient find reveal: exact-column scroll stayed at the physical line start");
         }
     }
 
@@ -88,7 +85,7 @@ internal static class TransientSelectionRevealChecks
         if (Math.Abs(expected - actual) > 0.35)
         {
             throw new InvalidOperationException(
-                $"FAIL transient selection reveal: {message}: {expected:F2} != {actual:F2}");
+                $"FAIL transient find reveal: {message}: {expected:F2} != {actual:F2}");
         }
     }
 
@@ -104,7 +101,6 @@ internal static class TransientSelectionRevealChecks
     private sealed class PreviewEditor : IDisposable
     {
         private readonly MarkdownSemanticDocument _document;
-        private readonly MarkdownSemanticPresentation _presentation;
         private readonly double _width;
         private readonly double _height;
 
@@ -116,12 +112,13 @@ internal static class TransientSelectionRevealChecks
             Box.SetMarkdownEditAnimationEnabled(false);
             _document = new MarkdownSemanticDocument(Box.Document);
             Box.SetSemanticDocument(_document);
-            _presentation = new MarkdownSemanticPresentation(Box, _document);
+            Presentation = new MarkdownSemanticPresentation(Box, _document);
             Box.SetMarkdownRenderMode(MarkdownRenderModes.Full);
             Box.SetPreviewMode(true);
         }
 
         public MarkdownTextBox Box { get; }
+        public MarkdownSemanticPresentation Presentation { get; }
 
         public void Layout()
         {
@@ -138,8 +135,8 @@ internal static class TransientSelectionRevealChecks
 
         public void Dispose()
         {
-            Box.SetTransientSelectionRevealActive(false);
-            _presentation.Dispose();
+            Presentation.SetTransientFindReveal(null, 0);
+            Presentation.Dispose();
             Box.SetSemanticDocument(null);
             _document.Dispose();
         }
