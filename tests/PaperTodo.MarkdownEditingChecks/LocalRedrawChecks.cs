@@ -217,6 +217,7 @@ internal static partial class Program
             Box.Arrange(new Rect(0, 0, 800, 600));
             Box.UpdateLayout();
             View.EnsureVisualLines();
+            Pump();
         }
 
         public double XAtOffset(int offset)
