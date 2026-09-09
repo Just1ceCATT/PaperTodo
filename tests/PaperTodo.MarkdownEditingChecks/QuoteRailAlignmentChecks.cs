@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Media;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using PaperTodo;
@@ -21,70 +22,29 @@ internal static class QuoteRailAlignmentChecks
     [ModuleInitializer]
     internal static void Run()
     {
-        CheckLogicalPrefix();
+        foreach (var family in new[] { "Segoe UI", "Consolas" })
+        foreach (var mode in new[] { TextFormattingMode.Display, TextFormattingMode.Ideal })
         foreach (var fontScale in FontScales)
         {
-            Check(
-                "- > a\n  > b",
-                fontScale,
-                $"unordered list continuation at {fontScale:0.##}x font");
-            Check(
-                "10. > a\n    > b",
-                fontScale,
-                $"wide ordered list continuation at {fontScale:0.##}x font");
+            foreach (var source in new[]
+            {
+                "- > a\n  > b", "- > a\n  b", "> a\nb",
+                "> > a\n> b", "> - > a\n>   b", "> **a**\n**b**",
+                "10. > a\n    > b", "-\t> a\n\t> b"
+            })
+            {
+                Check(source, fontScale, family, mode);
+            }
         }
 
-        Console.WriteLine("PASS list-contained quote rails share logical X across physical lines and font scales");
+        Console.WriteLine("PASS quote rails follow actual slots; lazy and explicit gutters share widths");
     }
 
-    private static void CheckLogicalPrefix()
+    private static void Check(
+        string source, double fontScale, string family, TextFormattingMode mode)
     {
-        const string source = "10. > a\n    > b";
-        var snapshot = MarkdownSemanticSnapshot.Parse(source);
-        var first = ParseLine(source, snapshot, 0);
-        var second = ParseLine(source, snapshot, 1);
-        var firstQuote = first.Tokens.Single(token => token.IsQuote);
-        var secondQuote = second.Tokens.Single(token => token.IsQuote);
-        var firstPrefix = MarkdownContainerPrefix.BuildLogicalVisualPrefix(
-            "10. > a",
-            first,
-            firstQuote.MarkerStart);
-        var secondPrefix = MarkdownContainerPrefix.BuildLogicalVisualPrefix(
-            "    > b",
-            second,
-            secondQuote.MarkerStart);
-        if (!string.Equals(firstPrefix, "    ", StringComparison.Ordinal) ||
-            !string.Equals(secondPrefix, "    ", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"FAIL quote rail alignment: logical prefixes '{firstPrefix}'/'{secondPrefix}'");
-        }
-    }
-
-    private static MarkdownContainerPrefixInfo ParseLine(
-        string source,
-        MarkdownSemanticSnapshot snapshot,
-        int lineZero)
-    {
-        var start = snapshot.LineStarts[lineZero];
-        var end = lineZero + 1 < snapshot.LineStarts.Length
-            ? snapshot.LineStarts[lineZero + 1]
-            : source.Length;
-        while (end > start && source[end - 1] is '\r' or '\n')
-        {
-            end--;
-        }
-
-        return MarkdownContainerPrefix.Parse(
-            source[start..end],
-            snapshot,
-            start,
-            end);
-    }
-
-    private static void Check(string source, double fontScale, string message)
-    {
-        using var editor = new RailEditor(source, fontScale);
+        using var editor = new RailEditor(source, fontScale, family, mode);
+        var message = $"{source.Replace('\n', '|')}: {family}, {mode}, {fontScale}x";
         var box = editor.Box;
         var view = box.TextArea.TextView;
         var snapshot = MarkdownSemanticSnapshot.Parse(source);
@@ -93,17 +53,56 @@ internal static class QuoteRailAlignmentChecks
         var firstRails = GetRails(editor.Presentation, view, box.Document, snapshot, first);
         var secondRails = GetRails(editor.Presentation, view, box.Document, snapshot, second);
 
-        if (firstRails.Length != 1 || secondRails.Length != 1)
+        foreach (var line in new[] { first, second })
         {
-            throw new InvalidOperationException(
-                $"FAIL quote rail alignment: {message}: rail counts {firstRails.Length}/{secondRails.Length}");
+            var prefix = MarkdownContainerPrefix.Parse(
+                box.Document.GetText(line), snapshot, line.Offset, line.EndOffset);
+            var rails = line == first ? firstRails : secondRails;
+            if (rails.Length != prefix.QuoteLevel)
+            {
+                throw new InvalidOperationException($"FAIL quote rail count: {message}");
+            }
+            var railIndex = 0;
+            foreach (var token in prefix.Tokens.Where(token => token.IsQuote))
+            {
+                if (!MarkdownSemanticPresentation.TryGetTextPoint(
+                    view, line, line.Offset + token.MarkerStart, VisualYPosition.TextMiddle, out var point))
+                {
+                    throw new InvalidOperationException($"FAIL quote marker position: {message}");
+                }
+                Near(point.X + 2.5 * editor.Presentation.ZoomFactor(), rails[railIndex++], message);
+            }
         }
 
-        var delta = Math.Abs(firstRails[0] - secondRails[0]);
-        if (delta > 0.25)
+        // Ordered-list text intentionally keeps its native glyph widths. Check its rails against
+        // those actual cells above, not against an independently measured string of spaces.
+        if (!source.StartsWith("10.", StringComparison.Ordinal))
+        {
+            for (var index = 0; index < firstRails.Length; index++)
+            {
+                Near(firstRails[index], secondRails[index], message);
+            }
+            if (!MarkdownSemanticPresentation.TryGetTextPoint(
+                    view, first, source.IndexOf('a'), VisualYPosition.TextMiddle, out var firstBody) ||
+                !MarkdownSemanticPresentation.TryGetTextPoint(
+                    view, second, source.IndexOf('b'), VisualYPosition.TextMiddle, out var secondBody))
+            {
+                throw new InvalidOperationException($"FAIL quote body position: {message}");
+            }
+            Near(firstBody.X, secondBody.X, message + " body alignment");
+        }
+        if (box.Text != source || box.CanUndo)
+        {
+            throw new InvalidOperationException($"FAIL quote layout mutated source/history: {message}");
+        }
+    }
+
+    private static void Near(double expected, double actual, string message)
+    {
+        if (Math.Abs(expected - actual) > 0.35)
         {
             throw new InvalidOperationException(
-                $"FAIL quote rail alignment: {message}: X {firstRails[0]:F3}/{secondRails[0]:F3}, delta {delta:F3}px");
+                $"FAIL quote rail alignment: {message}: {expected:F3} != {actual:F3}");
         }
     }
 
@@ -126,7 +125,7 @@ internal static class QuoteRailAlignmentChecks
             ?? throw new InvalidOperationException("FAIL quote rail alignment: GetQuoteRailXs missing");
         var result = method.Invoke(
             renderer,
-            new object[] { view, document, snapshot, line, presentation.ZoomFactor(), 1.0 });
+            new object[] { view, document, snapshot, line, presentation.ZoomFactor() });
         return result as double[]
             ?? throw new InvalidOperationException("FAIL quote rail alignment: unexpected rail result");
     }
@@ -135,10 +134,12 @@ internal static class QuoteRailAlignmentChecks
     {
         private readonly MarkdownSemanticDocument _document;
 
-        public RailEditor(string source, double fontScale)
+        public RailEditor(string source, double fontScale, string family, TextFormattingMode mode)
         {
             Box = new MarkdownTextBox { Text = source };
             Box.FontSize = Math.Max(1, Box.FontSize * fontScale);
+            Box.FontFamily = new FontFamily(family);
+            TextOptions.SetTextFormattingMode(Box, mode);
             Box.SetMarkdownEditAnimationEnabled(false);
             _document = new MarkdownSemanticDocument(Box.Document);
             Box.SetSemanticDocument(_document);

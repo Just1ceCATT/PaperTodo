@@ -141,8 +141,11 @@ internal sealed partial class MarkdownSemanticPresentation
         return formatted.WidthIncludingTrailingWhitespace;
     }
 
+    private double GetQuoteUnitWidth(TextView textView, TextRunProperties properties) =>
+        GetMarkerSlotMetrics(textView).QuoteWidth + GetNativeSpaceAdvance(textView, properties);
+
     private double GetNativeSpaceAdvance(
-        ITextRunConstructionContext context,
+        TextView textView,
         TextRunProperties properties)
     {
         // The bullet cell must track the actual transformed run, not only the editor-wide font.
@@ -150,8 +153,8 @@ internal sealed partial class MarkdownSemanticPresentation
         // prepared; key the cache from those final TextRunProperties so a code-space advance is
         // never reused by a later normal-text bullet (or vice versa).
         var typeface = properties.Typeface;
-        var formattingMode = TextOptions.GetTextFormattingMode(context.TextView);
-        var dpi = VisualTreeHelper.GetDpi(context.TextView).PixelsPerDip;
+        var formattingMode = TextOptions.GetTextFormattingMode(textView);
+        var dpi = VisualTreeHelper.GetDpi(textView).PixelsPerDip;
         var key = new NativeSpaceMetricKey(
             typeface.FontFamily.Source,
             typeface.Style,
@@ -438,7 +441,7 @@ internal sealed partial class MarkdownSemanticPresentation
                 AppTypography.TextFormattingMode,
                 VisualTreeHelper.GetDpi(context.TextView).PixelsPerDip);
             var width = _useNativeSpaceAdvance
-                ? _owner.GetNativeSpaceAdvance(context, properties)
+                ? _owner.GetNativeSpaceAdvance(context.TextView, properties)
                 : Math.Max(0.5, _width);
             return new FixedMarkerCellRun(properties, width, formatted);
         }
