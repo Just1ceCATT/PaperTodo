@@ -418,7 +418,7 @@ public sealed partial class AppController
         SettingsPage.Visual => BuildVisualSettingsPage(),
         SettingsPage.Shortcuts => BuildShortcutSettingsPage(),
         SettingsPage.Plugins => BuildPluginsSettingsPage(),
-        SettingsPage.Labs => BuildSettingsSidebarLabsPage(),
+        SettingsPage.Labs => BuildLabsSettingsPage(),
         _ => BuildSettingsSidebarGeneralPage()
     };
 
