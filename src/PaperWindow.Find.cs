@@ -11,7 +11,7 @@ namespace PaperTodo;
 
 public sealed partial class PaperWindow
 {
-    private const double FindPopupBaseWidth = 276;
+    private const double FindPopupBaseWidth = 296;
 
     private readonly record struct PaperFindMatch(string? TodoItemId, int Offset, int Length)
     {
@@ -22,6 +22,7 @@ public sealed partial class PaperWindow
     private Border? _findHost;
     private TextBox? _findInput;
     private TextBlock? _findCountText;
+    private TextBlock? _findDragHandle;
     private Button? _findPreviousButton;
     private Button? _findNextButton;
     private readonly List<PaperFindMatch> _findMatches = [];
@@ -193,7 +194,7 @@ public sealed partial class PaperWindow
             CornerRadius = new CornerRadius(RadiusControl),
             SnapsToDevicePixels = true,
             UseLayoutRounding = true,
-            Effect = CreatePaperChromeShadow(blurRadius: 10, opacity: 0.16, shadowDepth: 2)
+            Cursor = Cursors.SizeAll
         };
 
         var row = new Grid();
@@ -206,6 +207,7 @@ public sealed partial class PaperWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var input = new TextBox
         {
@@ -213,6 +215,7 @@ public sealed partial class PaperWindow
             Padding = new Thickness(5, 2, 5, 2),
             VerticalContentAlignment = VerticalAlignment.Center,
             FocusVisualStyle = null,
+            Cursor = Cursors.IBeam,
             ToolTip = "Ctrl+F"
         };
         input.TextChanged += (_, _) =>
@@ -291,7 +294,35 @@ public sealed partial class PaperWindow
         Grid.SetColumn(close, 4);
         row.Children.Add(close);
 
+        var dragHandle = new TextBlock
+        {
+            Text = "⠿",
+            FontFamily = new System.Windows.Media.FontFamily("Segoe UI Symbol"),
+            TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(dragHandle, 5);
+        row.Children.Add(dragHandle);
+
         host.Child = row;
+        host.PreviewMouseLeftButtonDown += OnBuiltInFindDragStart;
+        host.PreviewMouseMove += OnBuiltInFindDragMove;
+        host.PreviewMouseLeftButtonUp += (_, e) =>
+        {
+            if (_findDragStart == null)
+            {
+                return;
+            }
+            EndBuiltInFindDrag();
+            e.Handled = true;
+        };
+        host.LostMouseCapture += (_, _) =>
+        {
+            if (!host.IsMouseCaptured)
+            {
+                _findDragStart = null;
+            }
+        };
 
         var popup = new Popup
         {
@@ -311,6 +342,7 @@ public sealed partial class PaperWindow
         };
         popup.Closed += (_, _) =>
         {
+            EndBuiltInFindDrag();
             UnhookBuiltInFindContentChanges();
             ReleaseTodoInactiveFindSelection();
             RefreshExperimentalOpacity();
@@ -320,6 +352,7 @@ public sealed partial class PaperWindow
         _findHost = host;
         _findInput = input;
         _findCountText = count;
+        _findDragHandle = dragHandle;
         _findPreviousButton = previous;
         _findNextButton = next;
 
@@ -361,6 +394,7 @@ public sealed partial class PaperWindow
         button.Padding = new Thickness(0);
         button.Margin = new Thickness(1, 0, 0, 0);
         button.Focusable = false;
+        button.Cursor = Cursors.Arrow;
         return button;
     }
 
@@ -369,6 +403,11 @@ public sealed partial class PaperWindow
         Size targetSize,
         Point offset)
     {
+        if (_findPopup?.PlacementRectangle.IsEmpty == false)
+        {
+            return [new CustomPopupPlacement(new Point(), PopupPrimaryAxis.None)];
+        }
+
         var y = TitleBarHeight + 4;
         var inside = new CustomPopupPlacement(
             new Point(Math.Max(6, targetSize.Width - popupSize.Width - 6), y),
@@ -425,6 +464,13 @@ public sealed partial class PaperWindow
             0,
             AppTypography.Scale(3),
             0);
+
+        if (_findDragHandle != null)
+        {
+            _findDragHandle.Foreground = WeakTextBrush;
+            _findDragHandle.FontSize = AppTypography.Scale(16);
+            _findDragHandle.Width = AppTypography.FitChrome(20);
+        }
 
         UpdateFindButtonMetrics(_findPreviousButton);
         UpdateFindButtonMetrics(_findNextButton);
