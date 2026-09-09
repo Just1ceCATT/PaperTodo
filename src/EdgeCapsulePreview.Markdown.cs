@@ -5,7 +5,6 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Threading;
 
 namespace PaperTodo;
 
@@ -52,7 +51,7 @@ internal sealed class MarkdownEdgeCapsulePreviewView : EdgeCapsuleLivePreviewVie
 {
     private readonly TextBlock _title;
     private readonly StackPanel _body;
-    private readonly ScrollViewer _scrollViewer;
+    private readonly MarkdownEdgeCapsulePreviewViewport _viewport;
 
     public MarkdownEdgeCapsulePreviewView(
         EdgeCapsulePreviewContext context,
@@ -80,40 +79,84 @@ internal sealed class MarkdownEdgeCapsulePreviewView : EdgeCapsuleLivePreviewVie
         heading.Children.Add(_title);
         Children.Add(heading);
 
-        _body = new StackPanel
+        _body = new StackPanel();
+        _viewport = new MarkdownEdgeCapsulePreviewViewport(_body)
         {
             Margin = new Thickness(1, 0, 2, 0)
         };
-        _scrollViewer = new ScrollViewer
-        {
-            Content = _body,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(0),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Focusable = false
-        };
-        Grid.SetRow(_scrollViewer, 1);
-        Children.Add(_scrollViewer);
+        Grid.SetRow(_viewport, 1);
+        Children.Add(_viewport);
 
         InitializeLiveContent();
     }
 
     protected override void RebuildContent()
     {
-        var offset = _scrollViewer.VerticalOffset;
         var title = Context.Title;
         _title.Text = title;
         _title.ToolTip = title;
-        MarkdownEdgeCapsulePreviewRenderer.RenderInto(
+        var truncated = MarkdownEdgeCapsulePreviewRenderer.RenderInto(
             _body,
             Context.ReadMarkdownText(),
             Context.OpenExternal,
             Context.ReadMarkdownRenderMode());
-        Dispatcher.BeginInvoke(
-            (Action)(() => _scrollViewer.ScrollToVerticalOffset(offset)),
-            DispatcherPriority.Loaded);
+        _viewport.SetSourceTruncated(truncated);
+    }
+}
+
+internal sealed class MarkdownEdgeCapsulePreviewViewport : Panel
+{
+    private readonly StackPanel _body;
+    private readonly TextBlock _overflowIndicator;
+    private readonly RectangleGeometry _bodyClip = new();
+    private bool _sourceTruncated;
+
+    public MarkdownEdgeCapsulePreviewViewport(StackPanel body)
+    {
+        ClipToBounds = true;
+        _body = body;
+        _body.Clip = _bodyClip;
+        _overflowIndicator = new TextBlock
+        {
+            Text = "…",
+            FontFamily = NoteTypography.FontFamily,
+            FontSize = AppTypography.Scale(14),
+            TextAlignment = TextAlignment.Center,
+            IsHitTestVisible = false
+        };
+        _overflowIndicator.SetResourceReference(TextBlock.ForegroundProperty, "WeakTextBrushKey");
+        Children.Add(_body);
+        Children.Add(_overflowIndicator);
+    }
+
+    public void SetSourceTruncated(bool truncated)
+    {
+        _sourceTruncated = truncated;
+        InvalidateArrange();
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        var naturalSize = new Size(availableSize.Width, double.PositiveInfinity);
+        _body.Measure(naturalSize);
+        _overflowIndicator.Measure(naturalSize);
+        return new Size(
+            Math.Min(availableSize.Width, Math.Max(_body.DesiredSize.Width, _overflowIndicator.DesiredSize.Width)),
+            Math.Min(availableSize.Height, _body.DesiredSize.Height));
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        // The card only shows its top excerpt. Use the actual body height so blank source
+        // lines cannot consume a fixed line budget and leave usable card space empty.
+        var overflow = _sourceTruncated || _body.DesiredSize.Height > finalSize.Height;
+        var indicatorHeight = overflow ? Math.Min(finalSize.Height, _overflowIndicator.DesiredSize.Height) : 0;
+        var visibleHeight = finalSize.Height - indicatorHeight;
+        _bodyClip.Rect = new Rect(0, 0, finalSize.Width, visibleHeight);
+        _body.Arrange(new Rect(0, 0, finalSize.Width, _body.DesiredSize.Height));
+        _overflowIndicator.Opacity = overflow ? 1 : 0;
+        _overflowIndicator.Arrange(new Rect(0, visibleHeight, finalSize.Width, indicatorHeight));
+        return finalSize;
     }
 }
 
@@ -233,7 +276,7 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         return Math.Max(1, estimate);
     }
 
-    public static void RenderInto(
+    public static bool RenderInto(
         Panel target,
         string? markdown,
         Action<string> openExternal,
@@ -243,7 +286,7 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         if (string.IsNullOrWhiteSpace(markdown))
         {
             AddEmptyState(target);
-            return;
+            return false;
         }
 
         var code = new StringBuilder();
@@ -323,14 +366,11 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         {
             truncated = true;
         }
-        if (truncated)
-        {
-            AddTruncationState(target);
-        }
         if (target.Children.Count == 0)
         {
             AddEmptyState(target);
         }
+        return truncated;
     }
 
     private static void AddEmptyState(Panel target)
@@ -460,15 +500,6 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
             run.Foreground = Theme.SyntaxFadeBrush;
         }
         target.Add(run);
-    }
-
-    private static void AddTruncationState(Panel target)
-    {
-        var more = NewTextBlock("…", AppTypography.Scale(14));
-        more.Margin = new Thickness(4, 6, 4, 2);
-        more.HorizontalAlignment = HorizontalAlignment.Center;
-        more.SetResourceReference(TextBlock.ForegroundProperty, "WeakTextBrushKey");
-        target.Children.Add(more);
     }
 
     private static FrameworkElement BuildBlock(

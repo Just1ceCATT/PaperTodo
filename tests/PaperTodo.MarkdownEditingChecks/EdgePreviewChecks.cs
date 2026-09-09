@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using PaperTodo;
 
@@ -108,17 +109,86 @@ internal static partial class Program
             }
         });
 
-        check("Edge note preview keeps ordinary content beyond twelve source lines", () =>
+        check("Edge note preview clips overflow without scrolling and fills available space", () =>
+        {
+            var source = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"正文 {i}"));
+            var mode = MarkdownRenderModes.Off;
+            var invalidation = new EdgeCapsulePreviewInvalidationSource();
+            var context = new EdgeCapsulePreviewContext(
+                new PaperData(), () => "笔记", false, () => source, () => mode,
+                (_, _) => false, _ => false, () => new Style(), () => "", _ => { }, invalidation);
+            var descriptor = MarkdownEdgeCapsulePreviewProvider.Instance.Describe(context);
+            var view = (EdgeCapsuleLivePreviewView)descriptor.CreateContent(descriptor.Size);
+            view.PrepareForFirstDisplay();
+            var window = new Window { Content = view, Width = 460, Height = 410, ShowInTaskbar = false };
+            try
+            {
+                window.Show();
+                Pump();
+                var viewport = view.Children.OfType<MarkdownEdgeCapsulePreviewViewport>().Single();
+                var body = viewport.Children.OfType<StackPanel>().Single();
+                var indicator = viewport.Children.OfType<TextBlock>().Single();
+                foreach (var renderMode in new[] { MarkdownRenderModes.Off, MarkdownRenderModes.Basic, MarkdownRenderModes.Enhanced, MarkdownRenderModes.Full })
+                {
+                    mode = renderMode;
+                    invalidation.Invalidate();
+                    Pump();
+                    Require(!EdgePreviewElements(view).OfType<ScrollViewer>().Any(), "note preview has no scrolling surface in any mode");
+                    var clip = body.Clip.Bounds;
+                    var last = (FrameworkElement)body.Children[^1];
+                    Require(last.TranslatePoint(new Point(), viewport).Y >= clip.Bottom, "overflow remains outside the visible excerpt");
+                    Equal(1.0, indicator.Opacity, "overflow shows an ellipsis");
+                    Require(indicator.TranslatePoint(new Point(), viewport).Y >= clip.Bottom, "ellipsis does not cover visible text");
+                    var first = (FrameworkElement)body.Children[0];
+                    var top = first.TranslatePoint(new Point(), viewport);
+                    first.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
+                    {
+                        RoutedEvent = Mouse.MouseWheelEvent
+                    });
+                    Pump();
+                    Equal(top, first.TranslatePoint(new Point(), viewport), "mouse wheel cannot move the excerpt");
+                    Equal(clip, body.Clip.Bounds, "mouse wheel cannot reveal more content");
+                }
+
+                source = string.Join("\n\n", Enumerable.Range(1, 10).Select(i => $"正文 {i}"));
+                invalidation.Invalidate();
+                Pump();
+                var finalParagraph = (FrameworkElement)body.Children[^1];
+                Require(EdgePreviewText(finalParagraph).Contains("正文 10"), "blank lines do not exhaust an arbitrary visible block count");
+                Require(finalParagraph.TranslatePoint(new Point(0, finalParagraph.ActualHeight), viewport).Y <= body.Clip.Bounds.Bottom,
+                    "later paragraph is actually visible when the card has room");
+                Equal(0.0, indicator.Opacity, "fitting content has no ellipsis");
+
+                window.Height = 180;
+                Pump();
+                Equal(1.0, indicator.Opacity, "a smaller viewport recomputes overflow");
+                window.Height = 410;
+                Pump();
+                Equal(0.0, indicator.Opacity, "restoring space removes the overflow indicator");
+                source = "";
+                invalidation.Invalidate();
+                Pump();
+                Equal(0.0, indicator.Opacity, "empty content does not retain overflow state");
+            }
+            finally
+            {
+                window.Close();
+                Pump();
+            }
+        });
+
+        check("Edge note preview does not discard ordinary source before layout", () =>
         {
             var source = string.Join("\n\n", Enumerable.Range(1, 10).Select(i => $"正文 {i}"));
             var panel = new StackPanel();
-            MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
-            Require(EdgePreviewText(panel).Contains("正文 10"), "later paragraphs remain available");
-            Require(!EdgePreviewText(panel).Contains('…'), "ordinary note is not truncated");
+            var truncated = MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
+            Require(EdgePreviewText(panel).Contains("正文 10"), "later paragraphs remain available for layout");
+            Require(!truncated, "ordinary note is not truncated");
 
             source = new string('文', 700) + "\n段落之后";
-            MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
+            truncated = MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
             Require(EdgePreviewText(panel).Contains("段落之后"), "long paragraph does not discard following text");
+            Require(!truncated, "ordinary long paragraph is not truncated before layout");
         });
 
         check("Edge note preview still bounds pathological documents", () =>
@@ -126,12 +196,24 @@ internal static partial class Program
             foreach (var source in new[] { new string('文', 100000), string.Concat(Enumerable.Repeat("x\n", 10000)) })
             {
                 var panel = new StackPanel();
-                MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
+                var truncated = MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { });
                 Require(panel.Children.Count < 200, "visual tree remains bounded");
                 var text = EdgePreviewText(panel);
-                Require(text.Length < 20000 && text.Contains('…'), "bounded text has a truncation indicator");
+                Require(text.Length < 20000 && truncated, "bounded text reports source truncation to the viewport");
             }
         });
+    }
+
+    private static IEnumerable<DependencyObject> EdgePreviewElements(DependencyObject element)
+    {
+        yield return element;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+        {
+            foreach (var child in EdgePreviewElements(VisualTreeHelper.GetChild(element, i)))
+            {
+                yield return child;
+            }
+        }
     }
 
     private static string EdgePreviewText(DependencyObject element)
