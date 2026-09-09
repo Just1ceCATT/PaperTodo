@@ -583,6 +583,7 @@ public sealed partial class PaperWindow
         {
             return;
         }
+        TracePaperFormGeometry(collapsed ? "collapse-request" : "expand-request");
 
         if (collapsed)
         {
@@ -772,7 +773,9 @@ public sealed partial class PaperWindow
 
         RefreshEffectiveTopmost();
         UpdateAdvancedInteractionLockVisuals();
-        ApplySystemVisibility();
+        // Form changes affect only taskbar membership. A visible shell refresh hides/shows
+        // the layered HWND and can expose its cached bitmap before the new layout is rendered.
+        // Keep the current native surface through the animation; update membership at completion.
         _controller.MarkDirty();
 
         if (collapsed)
@@ -802,6 +805,16 @@ public sealed partial class PaperWindow
         // silently no-op and leave the wrong shadow parameters on the capsule/expanded form.
         ApplyPaperChromePresentation();
         RestoreCollapseStartPositionIfNeeded(shouldRestoreCollapseStartPosition, collapseStartLeft, collapseStartTop);
+        TracePaperFormGeometry("animation-ready");
+#if DEBUG
+        Dispatcher.BeginInvoke((Action)(() =>
+        {
+            if (transitionGeneration == _collapseTransitionGeneration && !IsClosed)
+            {
+                TracePaperFormGeometry("after-render-turn");
+            }
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+#endif
 
         if (animate)
         {
@@ -945,6 +958,7 @@ public sealed partial class PaperWindow
                 {
                     FinishExpandSnapStateRestore();
                 }
+                UpdateTaskbarVisibility();
             };
 
             BeginAnimation(TransitionProgressProperty, progressAnim);
@@ -1008,6 +1022,7 @@ public sealed partial class PaperWindow
             {
                 FinishExpandSnapStateRestore();
             }
+            UpdateTaskbarVisibility();
         }
 
         RefreshPaperContextMenus();
@@ -1086,6 +1101,22 @@ public sealed partial class PaperWindow
     private static bool IsFiniteWindowCoordinate(double value)
     {
         return !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void TracePaperFormGeometry(string phase)
+    {
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        _ = WindowNative.TryGetWindowDeviceBounds(this, out var bounds);
+        EdgeCapsulePerformanceDiagnostics.Trace(
+            $"paper.form phase={phase} paper={EdgeCapsulePerformanceDiagnostics.ShortId(_paper.Id)} " +
+            $"collapsed={_paper.IsCollapsed} visible={IsVisible} progress={TransitionProgress:F3} " +
+            $"hwndDpi={(handle != IntPtr.Zero ? GetDpiForWindow(handle) : 0)} visualDpi={dpi.DpiScaleX:F3} " +
+            $"native={bounds.Left},{bounds.Top},{bounds.Width}x{bounds.Height} " +
+            $"window={Width:F1}x{Height:F1} actual={ActualWidth:F1}x{ActualHeight:F1} " +
+            $"chrome={_paperChrome?.ActualWidth:F1}x{_paperChrome?.ActualHeight:F1} " +
+            $"scale={_shellScale.ScaleX:F3},{_shellScale.ScaleY:F3} taskbar={ShowInTaskbar}");
     }
 
 }

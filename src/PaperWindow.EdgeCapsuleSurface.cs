@@ -209,6 +209,18 @@ public sealed partial class PaperWindow
         var bootstrapBounds = programmaticOrigin == null
             ? DeepCapsuleMainWindowBootstrapBounds()
             : default;
+        if (programmaticOrigin == null &&
+            _controller.TryGetRememberedDeepCapsuleExpandedGeometry(
+                _paper, _paper.Width, _paper.Height, out var rememberedGeometry))
+        {
+            // Start on the restore monitor. Visiting the queue monitor first makes the same
+            // HWND change DPI twice before its first expand frame can be presented.
+            var left = rememberedGeometry.Bounds.Left;
+            var top = rememberedGeometry.Bounds.Top;
+            bootstrapBounds = new DeviceScreenRect(left, top,
+                left + (int)Math.Round(DesiredCapsuleWindowWidth * rememberedGeometry.DpiScaleX),
+                top + (int)Math.Round(PaperLayoutDefaults.CapsuleHeight * rememberedGeometry.DpiScaleY));
+        }
         var useNativeBootstrap = !bootstrapBounds.IsEmpty;
 
         BeginAnimation(Window.OpacityProperty, null);
@@ -236,6 +248,13 @@ public sealed partial class PaperWindow
                     Top = _paper.Y;
                 }
 
+                if (useNativeBootstrap)
+                {
+                    _ = TryApplyDeepCapsuleDeviceBounds(bootstrapBounds);
+                }
+                // Handle creation applies initial shell styles. Set the expanded taskbar state
+                // after that, while hidden, so WPF need not hide/show the first animation frame.
+                ShowInTaskbar = ShouldShowInTaskbar(collapsed: false);
                 Show();
                 if (useNativeBootstrap &&
                     !TryApplyDeepCapsuleDeviceBounds(bootstrapBounds))
@@ -253,6 +272,11 @@ public sealed partial class PaperWindow
                         Top = _paper.Y;
                     }
                 }
+                // The native move can change DPI; finish measuring the capsule at that DPI
+                // while transparent, before exposing the first expand frame.
+                RefreshCapsuleLabel();
+                UpdateLayout();
+                TracePaperFormGeometry("bootstrap-ready");
             });
         }
         finally
