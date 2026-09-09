@@ -30,7 +30,7 @@ internal sealed class InactiveTitleBarMask
 
     internal DrawingBrush MaskBrush { get; }
     internal double HeaderOpacity => _headerOpacity.Opacity;
-    internal double HeaderBottom => _header.Rect.Bottom;
+    internal double HeaderBottom => _header.Rect.IsEmpty ? 0 : _header.Rect.Bottom;
 
     internal void UpdateBounds(Size size, double headerBottom)
     {
