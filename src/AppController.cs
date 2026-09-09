@@ -2481,7 +2481,25 @@ public sealed partial class AppController : IDisposable
             return false;
         }
 
-        var area = EdgeCapsuleLayout.WorkAreaForQueue(currentMonitor);
+        // The remembered monitor/side identify the edge queue that owns this memory, not
+        // the screen the expanded paper must stay on. Resolve that screen from the saved
+        // paper rectangle before clamping, so cross-monitor positions can be restored.
+        var rememberedWidth = ClampPaperDimension(
+            paper.DeepCapsuleExpandedWidth.Value,
+            fallbackWidth,
+            PaperLayoutDefaults.MinWidth,
+            double.MaxValue);
+        var rememberedHeight = ClampPaperDimension(
+            paper.DeepCapsuleExpandedHeight.Value,
+            fallbackHeight,
+            PaperLayoutDefaults.MinHeight,
+            double.MaxValue);
+        var rememberedRect = new Rect(
+            paper.DeepCapsuleExpandedX.Value,
+            paper.DeepCapsuleExpandedY.Value,
+            rememberedWidth,
+            rememberedHeight);
+        var area = WindowWorkAreaHelper.WorkAreaFor(rememberedRect);
         if (area.Width <= 0 || area.Height <= 0)
         {
             return false;
@@ -2489,12 +2507,12 @@ public sealed partial class AppController : IDisposable
 
         const double margin = 8;
         var width = ClampPaperDimension(
-            paper.DeepCapsuleExpandedWidth.Value,
+            rememberedWidth,
             fallbackWidth,
             PaperLayoutDefaults.MinWidth,
             Math.Max(PaperLayoutDefaults.MinWidth, area.Width - (margin * 2)));
         var height = ClampPaperDimension(
-            paper.DeepCapsuleExpandedHeight.Value,
+            rememberedHeight,
             fallbackHeight,
             PaperLayoutDefaults.MinHeight,
             Math.Max(PaperLayoutDefaults.MinHeight, area.Height - (margin * 2)));
