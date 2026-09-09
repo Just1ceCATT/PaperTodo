@@ -377,6 +377,8 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
 
         var trimmed = line.TrimStart();
         var prefixLength = line.Length - trimmed.Length;
+        var prefixRenderMode = renderMode;
+        string? renderedPrefix = null;
         var heading = HeadingPattern.Match(trimmed);
         var task = TaskListPattern.Match(trimmed);
         var ordered = OrderedListPattern.Match(trimmed);
@@ -396,20 +398,54 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
         else if (task.Success || ordered.Success)
         {
             prefixLength += (task.Success ? task : ordered).Groups[2].Index;
+            // Ordered numbers and task states stay readable in Enhanced, just as in the note.
+            prefixRenderMode = MarkdownRenderModes.Basic;
         }
         else if (unordered.Success)
         {
+            var markerStart = prefixLength;
             prefixLength += unordered.Groups[1].Index;
+            if (renderMode == MarkdownRenderModes.Enhanced)
+            {
+                renderedPrefix = line[..markerStart] + "•" + line[(markerStart + 1)..prefixLength];
+                prefixRenderMode = MarkdownRenderModes.Basic;
+            }
         }
         else if (HorizontalRulePattern.IsMatch(trimmed))
         {
-            AddSourceSyntax(text.Inlines, line, renderMode);
-            return text;
+            return BuildSourceHorizontalRule(text, line, renderMode);
         }
 
-        AddSourceSyntax(text.Inlines, line[..prefixLength], renderMode);
+        AddSourceSyntax(text.Inlines, renderedPrefix ?? line[..prefixLength], prefixRenderMode);
         AddInlineContent(text.Inlines, line[prefixLength..], openExternal, 0, renderMode);
         return text;
+    }
+
+    private static FrameworkElement BuildSourceHorizontalRule(TextBlock text, string line, string renderMode)
+    {
+        var host = new Grid();
+        host.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        host.ColumnDefinitions.Add(new ColumnDefinition());
+        text.Text = line;
+        var enhanced = renderMode == MarkdownRenderModes.Enhanced;
+        if (enhanced)
+        {
+            // Keep the source line's height while replacing its visible markers with a rule.
+            text.Foreground = Brushes.Transparent;
+            Grid.SetColumnSpan(text, 2);
+        }
+        host.Children.Add(text);
+        var rule = new Border
+        {
+            Height = 1,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(enhanced ? 2 : 8, 0, 2, 0)
+        };
+        rule.SetResourceReference(Border.BackgroundProperty, "PaperBorderBrushKey");
+        Grid.SetColumn(rule, enhanced ? 0 : 1);
+        Grid.SetColumnSpan(rule, enhanced ? 2 : 1);
+        host.Children.Add(rule);
+        return host;
     }
 
     private static void AddSourceSyntax(InlineCollection target, string syntax, string renderMode)

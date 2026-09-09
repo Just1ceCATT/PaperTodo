@@ -36,6 +36,49 @@ internal static partial class Program
             Equal("标题\n粗体", EdgePreviewText(panel), "Full removes visible heading and emphasis syntax");
         });
 
+        check("Edge note preview keeps Enhanced list markers readable and renders rules", () =>
+        {
+            var panel = new StackPanel();
+            foreach (var source in new[] { "  - **条目**", "  + **条目**", "  * **条目**", "  12. **条目**", "  - [x] **条目**" })
+            {
+                foreach (var mode in new[] { MarkdownRenderModes.Off, MarkdownRenderModes.Basic, MarkdownRenderModes.Enhanced })
+                {
+                    MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, source, _ => { }, mode);
+                    var bullet = mode == MarkdownRenderModes.Enhanced && !source.Contains("[x]") && !source.Contains("12.");
+                    Equal(bullet ? "  • **条目**" : source, EdgePreviewText(panel), "marker respects mode and keeps indentation");
+                    var row = (TextBlock)panel.Children[0];
+                    Require(row.Inlines.FirstInline.Foreground is SolidColorBrush brush && brush.Color.A == 255,
+                        "visible bullet, number or task marker is not faded");
+                    if (mode == MarkdownRenderModes.Enhanced)
+                    {
+                        var syntax = row.Inlines.OfType<Run>().First(run => run.Text == "**");
+                        Require(syntax.Foreground is SolidColorBrush faded && faded.Color.A < 255,
+                            "inline emphasis syntax still fades independently of the list marker");
+                    }
+                }
+            }
+
+            foreach (var mode in new[] { MarkdownRenderModes.Off, MarkdownRenderModes.Basic, MarkdownRenderModes.Enhanced, MarkdownRenderModes.Full })
+            {
+                MarkdownEdgeCapsulePreviewRenderer.RenderInto(panel, "---", _ => { }, mode);
+                var rule = panel.Children[0] as Border ?? (panel.Children[0] as Grid)?.Children.OfType<Border>().Single();
+                Equal(mode != MarkdownRenderModes.Off, rule != null, "only enabled modes draw a rule");
+                if (rule != null)
+                {
+                    panel.Measure(new Size(300, double.PositiveInfinity));
+                    panel.Arrange(new Rect(0, 0, 300, panel.DesiredSize.Height));
+                    Require(rule.ActualWidth > 200, "rule spans the available row width");
+                }
+                if (mode is MarkdownRenderModes.Basic or MarkdownRenderModes.Enhanced)
+                {
+                    var sourceText = ((Grid)panel.Children[0]).Children.OfType<TextBlock>().Single();
+                    var alpha = ((SolidColorBrush)sourceText.Foreground).Color.A;
+                    Equal(mode == MarkdownRenderModes.Enhanced ? (byte)0 : (byte)255, alpha,
+                        "Basic keeps source visible; Enhanced replaces its visible markers");
+                }
+            }
+        });
+
         check("Open edge note preview refreshes after the render setting changes", () =>
         {
             var mode = MarkdownRenderModes.Off;
