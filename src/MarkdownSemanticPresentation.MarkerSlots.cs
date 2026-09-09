@@ -11,7 +11,7 @@ internal sealed partial class MarkdownSemanticPresentation
     private MarkerSlotElementGenerator? _markerSlotGenerator;
     private MarkerSlotMetricKey? _markerSlotMetricKey;
     private MarkerSlotMetrics _markerSlotMetrics;
-    private MarkerSlotMetricKey? _nativeSpaceMetricKey;
+    private NativeSpaceMetricKey? _nativeSpaceMetricKey;
     private double _nativeSpaceAdvance;
 
     private readonly record struct MarkerSlotMetricKey(
@@ -22,6 +22,17 @@ internal sealed partial class MarkdownSemanticPresentation
         FontStretch FontStretch,
         string StrongFontFamily,
         FontWeight StrongFontWeight,
+        TextFormattingMode TextFormattingMode,
+        double PixelsPerDip);
+
+    private readonly record struct NativeSpaceMetricKey(
+        string FontFamily,
+        FontStyle FontStyle,
+        FontWeight FontWeight,
+        FontStretch FontStretch,
+        double FontRenderingEmSize,
+        double FontHintingEmSize,
+        string CultureName,
         TextFormattingMode TextFormattingMode,
         double PixelsPerDip);
 
@@ -134,21 +145,32 @@ internal sealed partial class MarkdownSemanticPresentation
         ITextRunConstructionContext context,
         TextRunProperties properties)
     {
-        // GetMarkerSlotMetrics() runs during StartGeneration, before this TextRun is created, so the
-        // current revision key is already available. Cache the exact AvalonEdit TextFormatter result
-        // for that revision instead of constructing a formatter for every visible bullet.
-        if (_markerSlotMetricKey is { } key &&
-            _nativeSpaceMetricKey == key &&
-            _nativeSpaceAdvance > 0)
+        // The bullet cell must track the actual transformed run, not only the editor-wide font.
+        // Code/list combinations can change Typeface and em size after the marker metrics were
+        // prepared; key the cache from those final TextRunProperties so a code-space advance is
+        // never reused by a later normal-text bullet (or vice versa).
+        var typeface = properties.Typeface;
+        var formattingMode = TextOptions.GetTextFormattingMode(context.TextView);
+        var dpi = VisualTreeHelper.GetDpi(context.TextView).PixelsPerDip;
+        var key = new NativeSpaceMetricKey(
+            typeface.FontFamily.Source,
+            typeface.Style,
+            typeface.Weight,
+            typeface.Stretch,
+            properties.FontRenderingEmSize,
+            properties.FontHintingEmSize,
+            (properties.CultureInfo ?? UiLanguages.EffectiveUiCulture).Name,
+            formattingMode,
+            dpi);
+        if (_nativeSpaceMetricKey == key && _nativeSpaceAdvance > 0)
         {
             return _nativeSpaceAdvance;
         }
 
-        using var formatter = TextFormatter.Create(
-            TextOptions.GetTextFormattingMode(context.TextView));
+        using var formatter = TextFormatter.Create(formattingMode);
         using var line = FormattedTextElement.PrepareText(formatter, " ", properties);
         var width = Math.Max(0.5, line.WidthIncludingTrailingWhitespace);
-        _nativeSpaceMetricKey = _markerSlotMetricKey;
+        _nativeSpaceMetricKey = key;
         _nativeSpaceAdvance = width;
         return width;
     }
