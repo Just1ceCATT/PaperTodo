@@ -219,6 +219,7 @@ public sealed partial class PaperWindow
             () => _controller.PaperTitleText(_paper),
             !_paper.IsCollapsed,
             CurrentMarkdownTextForEdgeCapsulePreview,
+            () => _controller.State.MarkdownRenderMode,
             SetTodoDoneFromEdgeCapsulePreview,
             OpenTodoLinkedTargetFromEdgeCapsulePreview,
             CurrentTodoCheckBoxStyle,

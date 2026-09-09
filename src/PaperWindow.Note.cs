@@ -70,6 +70,7 @@ public sealed partial class PaperWindow
             TraceNoteRender($"UpdateMarkdownRenderMode mode={mode}");
             _noteBox.SetMarkdownRenderMode(mode);
         }
+        InvalidateEdgeCapsulePreviewContent();
     }
 
     public void UpdateImageReferenceTextMode()
