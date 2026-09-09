@@ -914,12 +914,13 @@ public sealed partial class PaperWindow : Window
 
         var dpi = GetDpiForWindow(hwnd);
         var dpiScale = dpi > 0 ? dpi / 96.0 : 1.0;
+        var interactiveTop = bounds.Top;
         if (_inactiveTitleBarMask is { HeaderOpacity: 0 } mask)
         {
             // Hidden chrome is absent from native hit testing too. Keep the resize edge
             // on the visible body; HTTRANSPARENT alone cannot forward to another process.
-            bounds.Top += (int)Math.Round(mask.HeaderBottom * dpiScale);
-            if (pointerY < bounds.Top)
+            interactiveTop += (int)Math.Round(mask.HeaderBottom * dpiScale);
+            if (pointerY < interactiveTop)
             {
                 return false;
             }
@@ -927,7 +928,7 @@ public sealed partial class PaperWindow : Window
         var resizeBorder = Math.Max(1.0, WindowChromeMargin * dpiScale);
         var nearLeft = pointerX < bounds.Left + resizeBorder;
         var nearRight = pointerX >= bounds.Right - resizeBorder;
-        var nearTop = pointerY < bounds.Top + resizeBorder;
+        var nearTop = pointerY < interactiveTop + resizeBorder;
         var nearBottom = pointerY >= bounds.Bottom - resizeBorder;
 
         if (nearTop && nearLeft)
