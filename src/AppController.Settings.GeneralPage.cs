@@ -135,6 +135,12 @@ public sealed partial class AppController
         rightColumn.Children.Add(WrapWithHint(
             _settingsCollapseExpandedDeepCapsuleOnClickCheckBox,
             "TipCollapseExpandedDeepCapsuleOnClick"));
+        rightColumn.Children.Add(WrapWithHint(
+            SettingsToggle(
+                Strings.Get("LabsDockedCapsulesNonTopmost"),
+                State.ExperimentalDockedCapsulesNonTopmost,
+                ToggleExperimentalDockedCapsulesNonTopmost),
+            "TipLabsDockedCapsulesNonTopmost"));
 
         if (State.AdvancedSettingsMode)
         {
@@ -198,6 +204,7 @@ public sealed partial class AppController
         State.RememberDeepCapsuleExpandedPosition = true;
         State.UseCapsuleCollapseAll = true;
         State.CollapseExpandedDeepCapsuleOnClick = false;
+        State.ExperimentalDockedCapsulesNonTopmost = false;
         State.MaxTitleLength = PaperTitles.DefaultMaxTitleLength;
         State.DeepCapsuleTitleMeasureCharacterLimit = 0;
 
@@ -205,6 +212,14 @@ public sealed partial class AppController
         ClampPaperTitlesToMaxLength(State.MaxTitleLength);
         SaveNow();
         ApplyGeneralSettingsAfterRestore();
+        foreach (var window in _windows.Values)
+        {
+            window.RefreshDeepCapsuleSlotTopmost();
+        }
+        foreach (var master in _masterCapsules.Values)
+        {
+            master.RefreshEffectiveTopmost();
+        }
         RefreshSettingsWindowContent();
     }
 }
