@@ -54,7 +54,7 @@ internal static class TransientSelectionRevealChecks
 
     private static void CheckWrappedSelectionScrollsToExactColumn()
     {
-        var source = string.Join(' ', Enumerable.Repeat("wrapped", 80)) + " needle";
+        var source = string.Join(" ", Enumerable.Repeat("wrapped", 80)) + " needle";
         using var editor = new PreviewEditor(source, width: 180, height: 90);
         editor.Layout();
 
