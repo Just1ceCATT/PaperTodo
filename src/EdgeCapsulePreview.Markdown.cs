@@ -119,10 +119,12 @@ internal static partial class MarkdownEdgeCapsulePreviewRenderer
     // The preview is a navigation surface, not a second document renderer. Bound both visual
     // nodes and source text so one pathological note cannot stall the hover transition.
     private const int MaximumMeasuredLines = 24;
-    private const int MaximumRenderedBlocks = 12;
-    private const int MaximumRenderedCharacters = 4096;
-    private const int MaximumBlockCharacters = 512;
-    private const int MaximumCodeCharacters = 2048;
+    // Empty source lines also produce blocks. A twelve-block budget could end an ordinary
+    // note before the card was filled; these are safety limits, not a visible line count.
+    private const int MaximumRenderedBlocks = 128;
+    private const int MaximumRenderedCharacters = 16384;
+    private const int MaximumBlockCharacters = 4096;
+    private const int MaximumCodeCharacters = 8192;
     private const int MaximumInlineDepth = 6;
 
     private readonly record struct PreviewLine(string Text, bool Truncated);
