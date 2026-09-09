@@ -149,7 +149,22 @@ public sealed partial class PaperWindow
             return true;
         }
 
-        targetWindow.ShowBuiltInFindAtGlobalMatch(query, target);
+        // A newly shown paper still has Loaded/system-visibility and Render work queued. Let
+        // that finish before opening/focusing its popup, otherwise the restore can take focus
+        // back or hide the popup. Do not reopen find if the user has already left the target.
+        _ = targetWindow.Dispatcher.BeginInvoke((Action)(() =>
+        {
+            if (targetWindow.IsClosed ||
+                !targetWindow.IsVisible ||
+                !targetWindow.IsActive ||
+                targetWindow._paper.IsCollapsed ||
+                !targetWindow.CanUseBuiltInFind())
+            {
+                return;
+            }
+
+            targetWindow.ShowBuiltInFindAtGlobalMatch(query, target);
+        }), DispatcherPriority.Background);
         if (!IsActive)
         {
             ScheduleExperimentalAutoCollapse(blockedAtDeactivation: false);
