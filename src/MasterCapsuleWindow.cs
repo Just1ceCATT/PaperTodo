@@ -501,9 +501,8 @@ public sealed class MasterCapsuleWindow : Window
 
     private double MasterDockedWidth(double pixelsPerDip)
     {
-        // Keep the arrow slot stable across ▾/▸ and reserve a compact two-digit count slot. This
-        // prevents normal state/count changes from resizing the master while still allowing 100+
-        // to grow rather than clipping the exact count.
+        // Keep both the arrow slot and the two-digit count slot stable. The master capsule width
+        // never changes with collapse state or count.
         var glyphWidth = Math.Max(
             MeasureText("▾", MasterGlyphFontSize, FontWeights.SemiBold, AppTypography.SymbolFontFamily, pixelsPerDip),
             MeasureText("▸", MasterGlyphFontSize, FontWeights.SemiBold, AppTypography.SymbolFontFamily, pixelsPerDip));
@@ -513,20 +512,12 @@ public sealed class MasterCapsuleWindow : Window
             MasterLabelFontWeight,
             MasterLabelFontFamily,
             pixelsPerDip);
-        var countWidth = Math.Max(
-            twoDigitCountWidth,
-            MeasureText(
-                _count.ToString(UiLanguages.EffectiveCulture),
-                MasterLabelFontSize,
-                MasterLabelFontWeight,
-                MasterLabelFontFamily,
-                pixelsPerDip));
-        _label.MinWidth = twoDigitCountWidth;
+        _label.Width = twoDigitCountWidth;
         var bodyWidth = Math.Ceiling(
             MasterLeftPadding +
             glyphWidth +
             MasterGlyphGap +
-            countWidth +
+            twoDigitCountWidth +
             MasterRightPadding +
             MasterInteriorBorderThickness);
         return Math.Max(1, bodyWidth + WindowChromeMargin);
