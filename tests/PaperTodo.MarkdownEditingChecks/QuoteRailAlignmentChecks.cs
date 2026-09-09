@@ -22,6 +22,9 @@ internal static class QuoteRailAlignmentChecks
     internal static void Run()
     {
         CheckLogicalPrefix();
+        CheckLazy("> a\nb");
+        CheckLazy("- > a\n  b");
+        CheckLazy("> **a**\n**b**");
         foreach (var fontScale in FontScales)
         {
             Check(
@@ -105,6 +108,38 @@ internal static class QuoteRailAlignmentChecks
             throw new InvalidOperationException(
                 $"FAIL quote rail alignment: {message}: X {firstRails[0]:F3}/{secondRails[0]:F3}, delta {delta:F3}px");
         }
+    }
+
+    private static void CheckLazy(string source)
+    {
+        using var editor = new RailEditor(source, 1.0);
+        var box = editor.Box;
+        var view = box.TextArea.TextView;
+        var snapshot = MarkdownSemanticSnapshot.Parse(source);
+        var first = box.Document.GetLineByNumber(1);
+        var second = box.Document.GetLineByNumber(2);
+        var firstRails = GetRails(editor.Presentation, view, box.Document, snapshot, first);
+        var secondRails = GetRails(editor.Presentation, view, box.Document, snapshot, second);
+        if (firstRails.Length != 1 || secondRails.Length != 1 ||
+            Math.Abs(firstRails[0] - secondRails[0]) > 0.35 ||
+            Math.Abs(BodyX(view, first, source.IndexOf('a')) - BodyX(view, second, source.IndexOf('b'))) > 0.35 ||
+            box.Text != source || box.CanUndo)
+        {
+            throw new InvalidOperationException($"FAIL lazy quote slot/rail alignment: {source}");
+        }
+    }
+
+    private static double BodyX(TextView view, DocumentLine line, int offset)
+    {
+        var visual = view.GetOrConstructVisualLine(line);
+        var relative = offset - visual.FirstDocumentLine.Offset;
+        // A zero-source gutter shares an offset with the preceding space and following body.
+        // Measure the actual body glyph rather than the preceding element's end.
+        var body = visual.Elements.First(element =>
+            element.RelativeTextOffset <= relative &&
+            relative < element.RelativeTextOffset + element.DocumentLength);
+        return visual.GetVisualPosition(body.GetVisualColumn(relative), VisualYPosition.TextMiddle).X
+            - view.HorizontalOffset;
     }
 
     private static double[] GetRails(

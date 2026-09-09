@@ -46,6 +46,7 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
         _editor.CaretRevealGestureEnded += OnCaretRevealGestureEnded;
         SyncCaretReveal();
         SyncRevealFade();
+        AttachMarkerSlots();
         AttachCollapseGenerator();
         RedrawAll();
     }
@@ -363,6 +364,7 @@ internal sealed partial class MarkdownSemanticPresentation : IDisposable
         DetachCaretTracking();
         _editor.CaretRevealGestureStarted -= OnCaretRevealGestureStarted;
         _editor.CaretRevealGestureEnded -= OnCaretRevealGestureEnded;
+        DetachMarkerSlots();
         DetachCollapseGenerator();
         AbortRevealFade();
         var textView = _editor.TextArea.TextView;
