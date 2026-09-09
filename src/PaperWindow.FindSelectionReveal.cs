@@ -13,6 +13,7 @@ public sealed partial class PaperWindow
     private EventHandler? _builtInFindRevealSelectionChangedHandler;
     private Popup? _builtInFindRevealTrackedPopup;
     private EventHandler? _builtInFindRevealPopupClosedHandler;
+    private bool _builtInFindRevealRefreshQueued;
     private int _builtInFindRevealScrollGeneration;
 
     internal static void OnBuiltInFindTextBoxGotKeyboardFocusForSelectionReveal(
@@ -53,7 +54,7 @@ public sealed partial class PaperWindow
             }
 
             _builtInFindRevealSelectionChangedHandler ??=
-                (_, _) => RefreshBuiltInFindSelectionReveal();
+                (_, _) => QueueBuiltInFindSelectionRevealRefresh();
             _builtInFindRevealTrackedNoteBox = _noteBox;
             _builtInFindRevealTrackedNoteBox.TextArea.SelectionChanged +=
                 _builtInFindRevealSelectionChangedHandler;
@@ -77,6 +78,29 @@ public sealed partial class PaperWindow
         }
 
         RefreshBuiltInFindSelectionReveal();
+    }
+
+    private void QueueBuiltInFindSelectionRevealRefresh()
+    {
+        if (_builtInFindRevealRefreshQueued)
+        {
+            return;
+        }
+
+        _builtInFindRevealRefreshQueued = true;
+        _ = Dispatcher.BeginInvoke((Action)(() =>
+        {
+            _builtInFindRevealRefreshQueued = false;
+            if (!IsBuiltInFindOpen)
+            {
+                return;
+            }
+
+            // TextEditor.Select raises SelectionChanged before ApplyCurrentFindMatch stores its new
+            // _findAppliedMatch. Defer one dispatcher turn so clear+select transitions coalesce and
+            // this code observes the final search state rather than the previous result.
+            RefreshBuiltInFindSelectionReveal();
+        }), DispatcherPriority.Background);
     }
 
     private void RefreshBuiltInFindSelectionReveal()
@@ -148,6 +172,7 @@ public sealed partial class PaperWindow
 
     private void DisableBuiltInFindSelectionRevealTracking()
     {
+        _builtInFindRevealRefreshQueued = false;
         _builtInFindRevealScrollGeneration++;
         _markdownBodySession?.SetTransientFindReveal(null, 0);
 
