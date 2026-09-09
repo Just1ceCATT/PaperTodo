@@ -265,8 +265,9 @@ public sealed partial class PaperWindow
                 isPreviewing = true;
                 // Focus can be cleared by the caller before preview mode is entered. Defer the
                 // decision until WPF has finished the current focus transition, then park focus
-                // on the active window only when no child control has claimed it. This keeps the
-                // window-level ESC handler available without stealing focus from title editing.
+                // on the active window only when no child control has claimed it. The standalone
+                // find Popup does not contribute to the owner's IsKeyboardFocusWithin, so check
+                // it separately to keep the window-level ESC fallback from stealing search input.
                 var deferredWorkGeneration = _noteDeferredWorkGeneration;
                 Dispatcher.BeginInvoke(
                     (Action)(() =>
@@ -282,6 +283,7 @@ public sealed partial class PaperWindow
                         if (isPreviewing &&
                             IsActive &&
                             !IsKeyboardFocusWithin &&
+                            _findHost?.IsKeyboardFocusWithin != true &&
                             !IsPaperContextMenuInteractionActive)
                         {
                             Focus();
