@@ -314,6 +314,45 @@ internal static class MarkdownContainerPrefix
             taskOwnerTokenIndex);
     }
 
+    /// <summary>
+    /// 构造显示层的逻辑前缀：列表 marker 中的非空白源码字符按等量空格计宽，引用 marker 与真实
+    /// 空白保持原样。这样 `10. ` 与其 continuation 的四空格拥有相同逻辑宽度，同时不修改原文。
+    /// </summary>
+    internal static string BuildLogicalVisualPrefix(
+        string sourceLine,
+        MarkdownContainerPrefixInfo container,
+        int endExclusive)
+    {
+        ArgumentNullException.ThrowIfNull(sourceLine);
+        ArgumentNullException.ThrowIfNull(container);
+
+        var end = Math.Clamp(endExclusive, 0, sourceLine.Length);
+        if (end == 0)
+        {
+            return string.Empty;
+        }
+
+        var chars = sourceLine[..end].ToCharArray();
+        foreach (var token in container.Tokens)
+        {
+            if (!token.IsList || token.MarkerStart >= end)
+            {
+                continue;
+            }
+
+            var markerEnd = Math.Min(end, token.MarkerEnd);
+            for (var index = Math.Max(0, token.MarkerStart); index < markerEnd; index++)
+            {
+                if (!char.IsWhiteSpace(chars[index]))
+                {
+                    chars[index] = ' ';
+                }
+            }
+        }
+
+        return new string(chars);
+    }
+
     private static int SkipWhitespace(string text, int start)
     {
         var index = Math.Clamp(start, 0, text.Length);

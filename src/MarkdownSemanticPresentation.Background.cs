@@ -140,8 +140,8 @@ internal sealed partial class MarkdownSemanticPresentation
         }
 
         /// <summary>
-        /// 引用轨道直接跟随 TextView 中真实或虚拟引用槽的位置。不要把源码前缀改写为空格后
-        /// 再测量：那会让轨道、正文和光标使用不同的宽度规则，尤其是 Tab 和混合字体。
+        /// Full 的固定槽位直接提供引用坐标；有序列表和其他档位保留原有逻辑前缀对齐。
+        /// 虚拟引用从实际占位元素读取位置和宽度，不再重新测量一个透明的 `> ` 字符串。
         /// </summary>
         private void DrawQuoteRails(
             TextView textView,
@@ -153,6 +153,7 @@ internal sealed partial class MarkdownSemanticPresentation
             double zoom)
         {
             var railRows = new List<double[]>(visible.Count);
+            var virtualUnitWidth = MeasureVirtualQuoteUnit(textView);
             foreach (var line in visible)
             {
                 railRows.Add(GetQuoteRailXs(
@@ -160,7 +161,8 @@ internal sealed partial class MarkdownSemanticPresentation
                     document,
                     snapshot,
                     line,
-                    zoom));
+                    zoom,
+                    virtualUnitWidth));
             }
 
             for (var row = 0; row < visible.Count; row++)
@@ -204,7 +206,8 @@ internal sealed partial class MarkdownSemanticPresentation
             IDocument document,
             MarkdownSemanticSnapshot snapshot,
             DocumentLine line,
-            double zoom)
+            double zoom,
+            double virtualUnitWidth)
         {
             var semantic = snapshot.GetLine(LineIndex(line));
             if (!semantic.IsQuoted || semantic.QuoteLevel <= 0)
@@ -226,10 +229,12 @@ internal sealed partial class MarkdownSemanticPresentation
                     continue;
                 }
 
-                if (MarkdownSemanticPresentation.TryGetTextPoint(
+                if (TryGetLogicalPrefixPoint(
                         textView,
                         line,
-                        line.Offset + token.MarkerStart,
+                        text,
+                        container,
+                        token.MarkerStart,
                         VisualYPosition.TextMiddle,
                         out var point))
                 {
@@ -239,35 +244,133 @@ internal sealed partial class MarkdownSemanticPresentation
 
             if (container.MissingQuoteLevels > 0)
             {
-                var visualLine = textView.GetVisualLine(line.LineNumber);
-                var indent = visualLine?.Elements.OfType<QuoteIndentElement>().FirstOrDefault();
-                if (visualLine != null && indent != null)
+                if (_owner.IsFullMode)
                 {
-                    // Source-offset mapping deliberately skips a zero-source indent. Use the
-                    // element's actual visual column, including when it consumes a hidden opener.
-                    var indentPoint = visualLine.GetVisualPosition(indent.VisualColumn, VisualYPosition.TextMiddle);
-                    for (var level = 0; level < indent.Levels; level++)
+                    var visualLine = textView.GetVisualLine(line.LineNumber);
+                    var indent = visualLine?.Elements.OfType<QuoteIndentElement>().FirstOrDefault();
+                    if (visualLine != null && indent != null)
                     {
-                        rails.Add(indentPoint.X - textView.HorizontalOffset + indent.UnitWidth * level + 2.5 * zoom);
+                        // Source offsets can name either side of a zero-source element. Its visual
+                        // column unambiguously identifies the gutter, even after a physical indent.
+                        var indentPoint = visualLine.GetVisualPosition(indent.VisualColumn, VisualYPosition.TextMiddle);
+                        for (var level = 0; level < indent.Levels; level++)
+                        {
+                            rails.Add(indentPoint.X - textView.HorizontalOffset + indent.UnitWidth * level + 2.5 * zoom);
+                        }
                     }
                 }
-                else if (!_owner.IsFullMode && visualLine?.Elements.FirstOrDefault() is { } element &&
-                    MarkdownSemanticPresentation.TryGetTextPoint(
-                        textView, line, line.Offset + container.ContentStart,
-                        VisualYPosition.TextMiddle, out var point))
+                else if (TryGetLogicalPrefixPoint(
+                    textView, line, text, container, container.ContentStart,
+                    VisualYPosition.TextMiddle, out var point))
                 {
-                    // Basic/Enhanced have no inserted gutter: start at the source position, never
-                    // subtract a width for an element that does not exist in those modes.
-                    var unitWidth = _owner.GetQuoteUnitWidth(textView, element.TextRunProperties);
+                    // Basic/Enhanced do not insert a gutter; retain their source-based position.
                     for (var level = 0; level < container.MissingQuoteLevels; level++)
                     {
-                        rails.Add(point.X + unitWidth * level + 2.5 * zoom);
+                        rails.Add(point.X + virtualUnitWidth * level + 2.5 * zoom);
                     }
                 }
             }
 
+            // 防御性兜底：即使某个点暂时无法从 TextView 取得，也保证语义层级不会少画轨道。
+            while (rails.Count < semantic.QuoteLevel)
+            {
+                rails.Add(2.5 * zoom + rails.Count * virtualUnitWidth);
+            }
+
             rails.Sort();
             return rails.ToArray();
+        }
+
+        /// <summary>
+        /// 把源码前缀换算成显示层逻辑 X。只把 Markdig 已确认的列表 marker 非空白字符替换成空格后
+        /// 测量，引用 marker 与用户真实空白保持不变；因此列表首行和 continuation 行共享同一缩进列。
+        /// </summary>
+        private bool TryGetLogicalPrefixPoint(
+            TextView textView,
+            DocumentLine line,
+            string sourceLine,
+            MarkdownContainerPrefixInfo container,
+            int relativeOffset,
+            VisualYPosition yPosition,
+            out Point point)
+        {
+            // Fixed unordered-list/quote slots now own the real prefix width in Full. Ordered
+            // lists still use native glyph widths, so keep their existing continuation alignment.
+            var hasOrderedListContext = false;
+            foreach (var span in _owner.CurrentSnapshot().SpansForLine(LineIndex(line)))
+            {
+                if (span.Kind == MarkdownSemanticSpanKind.OrderedList)
+                {
+                    hasOrderedListContext = true;
+                    break;
+                }
+            }
+            if (_owner.IsFullMode && !hasOrderedListContext)
+            {
+                return MarkdownSemanticPresentation.TryGetTextPoint(
+                    textView, line, line.Offset + relativeOffset, yPosition, out point);
+            }
+
+            point = default;
+            if (!MarkdownSemanticPresentation.TryGetTextPoint(
+                    textView,
+                    line,
+                    line.Offset,
+                    yPosition,
+                    out var lineStartPoint))
+            {
+                return false;
+            }
+
+            var logicalPrefix = MarkdownContainerPrefix.BuildLogicalVisualPrefix(
+                sourceLine,
+                container,
+                relativeOffset);
+            if (logicalPrefix.Length == 0)
+            {
+                point = lineStartPoint;
+                return true;
+            }
+
+            var typeface = new Typeface(
+                _owner._editor.FontFamily,
+                _owner._editor.FontStyle,
+                _owner._editor.FontWeight,
+                _owner._editor.FontStretch);
+            var formatted = new FormattedText(
+                logicalPrefix,
+                UiLanguages.EffectiveUiCulture,
+                FlowDirection.LeftToRight,
+                typeface,
+                _owner._editor.FontSize,
+                Brushes.Transparent,
+                null,
+                AppTypography.TextFormattingMode,
+                VisualTreeHelper.GetDpi(textView).PixelsPerDip);
+            point = new Point(
+                lineStartPoint.X + formatted.WidthIncludingTrailingWhitespace,
+                lineStartPoint.Y);
+            return double.IsFinite(point.X) && double.IsFinite(point.Y);
+        }
+
+        private double MeasureVirtualQuoteUnit(TextView textView)
+        {
+            var typeface = new Typeface(
+                _owner._editor.FontFamily,
+                _owner._editor.FontStyle,
+                _owner._editor.FontWeight,
+                _owner._editor.FontStretch);
+            var formatted = new FormattedText(
+                "> ",
+                UiLanguages.EffectiveUiCulture,
+                FlowDirection.LeftToRight,
+                typeface,
+                _owner._editor.FontSize,
+                Brushes.Transparent,
+                null,
+                AppTypography.TextFormattingMode,
+                VisualTreeHelper.GetDpi(textView).PixelsPerDip);
+            return Math.Max(1, formatted.WidthIncludingTrailingWhitespace);
         }
 
         private static bool ContainsNear(IReadOnlyList<double> values, double target)

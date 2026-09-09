@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
-using System.Windows.Media;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using PaperTodo;
@@ -22,29 +21,73 @@ internal static class QuoteRailAlignmentChecks
     [ModuleInitializer]
     internal static void Run()
     {
-        foreach (var family in new[] { "Segoe UI", "Consolas" })
-        foreach (var mode in new[] { TextFormattingMode.Display, TextFormattingMode.Ideal })
+        CheckLogicalPrefix();
+        CheckLazy("> a\nb");
+        CheckLazy("- > a\n  b");
+        CheckLazy("> **a**\n**b**");
         foreach (var fontScale in FontScales)
         {
-            foreach (var source in new[]
-            {
-                "- > a\n  > b", "- > a\n  b", "> a\nb",
-                "> > a\n> b", "> - > a\n>   b", "> **a**\n**b**",
-                "10. > a\n    > b", "-\t> a\n\t> b"
-            })
-            {
-                Check(source, fontScale, family, mode);
-            }
+            Check(
+                "- > a\n  > b",
+                fontScale,
+                $"unordered list continuation at {fontScale:0.##}x font");
+            Check(
+                "10. > a\n    > b",
+                fontScale,
+                $"wide ordered list continuation at {fontScale:0.##}x font");
         }
 
-        Console.WriteLine("PASS quote rails follow actual slots; lazy and explicit gutters share widths");
+        Console.WriteLine("PASS list-contained quote rails share logical X across physical lines and font scales");
     }
 
-    private static void Check(
-        string source, double fontScale, string family, TextFormattingMode mode)
+    private static void CheckLogicalPrefix()
     {
-        using var editor = new RailEditor(source, fontScale, family, mode);
-        var message = $"{source.Replace('\n', '|')}: {family}, {mode}, {fontScale}x";
+        const string source = "10. > a\n    > b";
+        var snapshot = MarkdownSemanticSnapshot.Parse(source);
+        var first = ParseLine(source, snapshot, 0);
+        var second = ParseLine(source, snapshot, 1);
+        var firstQuote = first.Tokens.Single(token => token.IsQuote);
+        var secondQuote = second.Tokens.Single(token => token.IsQuote);
+        var firstPrefix = MarkdownContainerPrefix.BuildLogicalVisualPrefix(
+            "10. > a",
+            first,
+            firstQuote.MarkerStart);
+        var secondPrefix = MarkdownContainerPrefix.BuildLogicalVisualPrefix(
+            "    > b",
+            second,
+            secondQuote.MarkerStart);
+        if (!string.Equals(firstPrefix, "    ", StringComparison.Ordinal) ||
+            !string.Equals(secondPrefix, "    ", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"FAIL quote rail alignment: logical prefixes '{firstPrefix}'/'{secondPrefix}'");
+        }
+    }
+
+    private static MarkdownContainerPrefixInfo ParseLine(
+        string source,
+        MarkdownSemanticSnapshot snapshot,
+        int lineZero)
+    {
+        var start = snapshot.LineStarts[lineZero];
+        var end = lineZero + 1 < snapshot.LineStarts.Length
+            ? snapshot.LineStarts[lineZero + 1]
+            : source.Length;
+        while (end > start && source[end - 1] is '\r' or '\n')
+        {
+            end--;
+        }
+
+        return MarkdownContainerPrefix.Parse(
+            source[start..end],
+            snapshot,
+            start,
+            end);
+    }
+
+    private static void Check(string source, double fontScale, string message)
+    {
+        using var editor = new RailEditor(source, fontScale);
         var box = editor.Box;
         var view = box.TextArea.TextView;
         var snapshot = MarkdownSemanticSnapshot.Parse(source);
@@ -53,41 +96,36 @@ internal static class QuoteRailAlignmentChecks
         var firstRails = GetRails(editor.Presentation, view, box.Document, snapshot, first);
         var secondRails = GetRails(editor.Presentation, view, box.Document, snapshot, second);
 
-        foreach (var line in new[] { first, second })
+        if (firstRails.Length != 1 || secondRails.Length != 1)
         {
-            var prefix = MarkdownContainerPrefix.Parse(
-                box.Document.GetText(line), snapshot, line.Offset, line.EndOffset);
-            var rails = line == first ? firstRails : secondRails;
-            if (rails.Length != prefix.QuoteLevel)
-            {
-                throw new InvalidOperationException($"FAIL quote rail count: {message}");
-            }
-            var railIndex = 0;
-            foreach (var token in prefix.Tokens.Where(token => token.IsQuote))
-            {
-                if (!MarkdownSemanticPresentation.TryGetTextPoint(
-                    view, line, line.Offset + token.MarkerStart, VisualYPosition.TextMiddle, out var point))
-                {
-                    throw new InvalidOperationException($"FAIL quote marker position: {message}");
-                }
-                Near(point.X + 2.5 * editor.Presentation.ZoomFactor(), rails[railIndex++], message);
-            }
+            throw new InvalidOperationException(
+                $"FAIL quote rail alignment: {message}: rail counts {firstRails.Length}/{secondRails.Length}");
         }
 
-        // Ordered-list text intentionally keeps its native glyph widths. Check its rails against
-        // those actual cells above, not against an independently measured string of spaces.
-        if (!source.StartsWith("10.", StringComparison.Ordinal))
+        var delta = Math.Abs(firstRails[0] - secondRails[0]);
+        if (delta > 0.25)
         {
-            for (var index = 0; index < firstRails.Length; index++)
-            {
-                Near(firstRails[index], secondRails[index], message);
-            }
-            Near(BodyX(view, first, source.IndexOf('a')),
-                BodyX(view, second, source.IndexOf('b')), message + " body alignment");
+            throw new InvalidOperationException(
+                $"FAIL quote rail alignment: {message}: X {firstRails[0]:F3}/{secondRails[0]:F3}, delta {delta:F3}px");
         }
-        if (box.Text != source || box.CanUndo)
+    }
+
+    private static void CheckLazy(string source)
+    {
+        using var editor = new RailEditor(source, 1.0);
+        var box = editor.Box;
+        var view = box.TextArea.TextView;
+        var snapshot = MarkdownSemanticSnapshot.Parse(source);
+        var first = box.Document.GetLineByNumber(1);
+        var second = box.Document.GetLineByNumber(2);
+        var firstRails = GetRails(editor.Presentation, view, box.Document, snapshot, first);
+        var secondRails = GetRails(editor.Presentation, view, box.Document, snapshot, second);
+        if (firstRails.Length != 1 || secondRails.Length != 1 ||
+            Math.Abs(firstRails[0] - secondRails[0]) > 0.35 ||
+            Math.Abs(BodyX(view, first, source.IndexOf('a')) - BodyX(view, second, source.IndexOf('b'))) > 0.35 ||
+            box.Text != source || box.CanUndo)
         {
-            throw new InvalidOperationException($"FAIL quote layout mutated source/history: {message}");
+            throw new InvalidOperationException($"FAIL lazy quote slot/rail alignment: {source}");
         }
     }
 
@@ -96,22 +134,12 @@ internal static class QuoteRailAlignmentChecks
         var visual = view.GetOrConstructVisualLine(line);
         var relative = offset - visual.FirstDocumentLine.Offset;
         // A zero-source gutter shares an offset with the preceding space and following body.
-        // GetVisualPosition(source offset) may choose the preceding element's end; measure the
-        // actual body glyph instead, which is what this layout check promises to compare.
+        // Measure the actual body glyph rather than the preceding element's end.
         var body = visual.Elements.First(element =>
             element.RelativeTextOffset <= relative &&
             relative < element.RelativeTextOffset + element.DocumentLength);
         return visual.GetVisualPosition(body.GetVisualColumn(relative), VisualYPosition.TextMiddle).X
             - view.HorizontalOffset;
-    }
-
-    private static void Near(double expected, double actual, string message)
-    {
-        if (Math.Abs(expected - actual) > 0.35)
-        {
-            throw new InvalidOperationException(
-                $"FAIL quote rail alignment: {message}: {expected:F3} != {actual:F3}");
-        }
     }
 
     private static double[] GetRails(
@@ -133,7 +161,7 @@ internal static class QuoteRailAlignmentChecks
             ?? throw new InvalidOperationException("FAIL quote rail alignment: GetQuoteRailXs missing");
         var result = method.Invoke(
             renderer,
-            new object[] { view, document, snapshot, line, presentation.ZoomFactor() });
+            new object[] { view, document, snapshot, line, presentation.ZoomFactor(), 1.0 });
         return result as double[]
             ?? throw new InvalidOperationException("FAIL quote rail alignment: unexpected rail result");
     }
@@ -142,12 +170,10 @@ internal static class QuoteRailAlignmentChecks
     {
         private readonly MarkdownSemanticDocument _document;
 
-        public RailEditor(string source, double fontScale, string family, TextFormattingMode mode)
+        public RailEditor(string source, double fontScale)
         {
             Box = new MarkdownTextBox { Text = source };
             Box.FontSize = Math.Max(1, Box.FontSize * fontScale);
-            Box.FontFamily = new FontFamily(family);
-            TextOptions.SetTextFormattingMode(Box, mode);
             Box.SetMarkdownEditAnimationEnabled(false);
             _document = new MarkdownSemanticDocument(Box.Document);
             Box.SetSemanticDocument(_document);

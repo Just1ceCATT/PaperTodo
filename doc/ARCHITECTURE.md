@@ -434,6 +434,6 @@ same AvalonEdit TextView
 - pipeline 刻意保持最小：precise source location + strikethrough + task list；PaperTodo 既有 bare HTTP(S)、inline HTML 白名单、图片协议等兼容边界在 snapshot/host 层显式处理，不直接启用整包 advanced extensions。
 - syntax fading 不修改源码或撤销记录。Basic/Enhanced 保持源码布局；Full 的布局由元素层控制，普通正文仍走 AvalonEdit 原生文本排版。
 - **Full 档 = 编辑器内 WYSIWYG 块级编辑态**：`MarkdownSemanticPresentation` 在 Full 下把块级装饰「常开」与控制符「按活动块显灵」结合。无需留白/缩进的控制符（ATX 标题 `#`、行内 `**`/`*`/`~~`/反引号、链接 `[]()` 非 label 部分、HTML 标签、转义反斜杠）由 `SyntaxCollapseElementGenerator` 在元素层塌缩为 ~0 宽单列（源码仍留在 Document/undo，不参与排版、内容紧凑重排）；任务 `[ ]`/`[x]`、无序列表 `-`/`*`/`+`、引用 `>` 由 `MarkerSlotElementGenerator` 持有稳定槽位，前缀空白和有序列表仍按原生文本排版；围栏等整行标记保留行高。光标所在块的控制符依 `MarkdownSemanticReveal` 纯判定显灵供源编辑；失焦进入整篇只读渲染。不建第二份 rendered document、不做 HTML/DOM/WebView，也不建 source→rendered offset mapping，仍受 D-019 / D-026 约束。Markdown 表格不在当前语法面内。
-- 引用竖线直接读取 TextView 的实际槽位坐标，不把列表符号替换为空格后另算位置。省略 `>` 的惰性续行由 `QuoteIndentElement` 占位，并与真实引用共用“引用槽宽 + 原生空格宽”；该元素仍可合并消费同偏移的塌缩语法，保持一份源码和光标边界。
+- Full 固定槽位对应的引用竖线直接读取 TextView 的实际坐标；有序列表的续行对齐及 Basic/Enhanced 定位保持原行为。省略 `>` 的惰性续行由 `QuoteIndentElement` 占位，并与真实引用共用“引用槽宽 + 原生空格宽”；该元素仍可合并消费同偏移的塌缩语法，保持一份源码和光标边界。
 - 图片 `i:` 协议、URL 打开白名单、原生保存仍属于 PaperTodo host concern；图片是否位于 code/container 等 Markdown 语义由同一 Markdig snapshot 决定。启动图片 GC 额外采用保守保护扫描，允许多保留但不因 parser 分歧误删 blob。
 - `MarkdownFencedCodeScanner` 只保留在“边界发现/受限预览”角色：Edge Mini 的有限导航近似以及大 Note incremental fence-window discovery 可以使用；它不是正文、持久化或数据回收的 Markdown authority，也不扩展成第二套 container-aware Markdown parser。

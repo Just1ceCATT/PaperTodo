@@ -1087,8 +1087,6 @@ PaperTodo 的产品需求更接近：打开 Note 时建立全文正确基线；�
 
 **Status:** Accepted
 
-> 本条最初的“全部透明保宽”已由下列 follow-up 收窄：普通行内控制符塌缩；任务、无序列表和引用使用稳定槽位。原方案的权衡保留为历史，不再作为当前所有标记的布局规则。
-
 ### Context
 
 编辑器内块渲染（refactor 8d4d02e）落地后，`MarkdownRenderModes.Full` 在代码里没有任何运行时分支：控制符淡化/透明只由 `mode==Enhanced && IsPreviewMode` 门控，因此「隐藏控制符、呈现最终排版」只在失焦只读预览态成立，聚焦编辑时仍是「源文 + 彩色标记」。这与产品对 Full（完全渲染）档的预期（编辑时也应看到按标题/列表/引用/代码块排版的结果，而不是原始 Markdown 标记）不一致，也无法支撑 Typora 式的“块级所见即所得”。
@@ -1153,13 +1151,6 @@ PaperTodo 的产品需求更接近：打开 Note 时建立全文正确基线；�
 - **触发**：元素层真塌缩最初用「1 个 visual column + U+200B 零宽字符 run」占位。但 U+200B 不只零宽，还带 Unicode「允许在此断行」语义，会在隐藏标记两端引入幻影断行点——如 `**foo**bar` 本应按连续的 `foobarbaz` 排版，却可能在 `foo`/`bar` 之间被断行。
 - **决定**：占位 run 改为 WPF 原生 `TextHidden`（`System.Windows.Media.TextFormatting`）——其语义就是「表示一段隐藏内容」，占用一个文本位置但零 advance、无字形、不产生断行。`CollapsedSyntaxElement` 的 `VisualLength` 恒为 1，故长度取 `VisualLength`（`new TextHidden(VisualLength)`），**不可取被隐藏的源码字符数**：AvalonEdit `VisualLineTextSource.GetTextRun` 强制 `run.Length > 0` 且 `≤ element.VisualLength`，传 `documentLength` 会抛异常。
 - **证据**：`src/MarkdownSemanticPresentation.Collapse.cs` `CollapsedSyntaxElement.CreateTextRun`。Architecture 只写「塌缩为 ~0 宽单列」未指名 U+200B，无需改动。
-
-### Follow-up：语义标记槽位与引用坐标统一（2026-09）
-
-- **背景**：按源码字形保宽会让 `[ ]`/`[x]` 和 `-`/`*`/`+` 的正文起点不一致；只把引用竖线的前缀替换成空格再测量，也会让轨道脱离真实正文和光标位置。
-- **决定**：Full 的真实任务、无序列表、引用标记由 `MarkerSlotElementGenerator` 排版；普通正文、真实空白和有序列表保持原生字形宽度。虚拟引用续行共用真实引用的槽宽与原生空格宽，竖线直接消费实际元素坐标。
-- **边界**：有序列表未改为固定槽位，因此不再用“把数字替换为空格”的另一套坐标伪造首行与续行的竖线对齐；其轨道跟随各行实际引用位置。不要通过删除源码、追加空格或改写 undo 实现显示对齐。
-- **证据**：`MarkdownSemanticPresentation.MarkerSlots.cs`、`.Collapse.cs`、`.Background.cs`；`QuoteRailAlignmentChecks.cs` 同时核对槽位、轨道和续行正文位置。
 
 ---
 
