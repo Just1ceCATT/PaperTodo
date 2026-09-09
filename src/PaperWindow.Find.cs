@@ -373,16 +373,10 @@ public sealed partial class PaperWindow
         var inside = new CustomPopupPlacement(
             new Point(Math.Max(6, targetSize.Width - popupSize.Width - 6), y),
             PopupPrimaryAxis.Horizontal);
-        var right = new CustomPopupPlacement(
-            new Point(targetSize.Width + 6, y),
-            PopupPrimaryAxis.Horizontal);
-        var left = new CustomPopupPlacement(
-            new Point(-popupSize.Width - 6, y),
-            PopupPrimaryAxis.Horizontal);
 
-        return targetSize.Width >= popupSize.Width + 12
-            ? [inside, right, left]
-            : [right, left, inside];
+        // Keep the anchor inside the paper even when the find bar is wider. Popup can overflow
+        // the paper and WPF still adjusts it at the screen edge; no detached side placement.
+        return [inside];
     }
 
     private void UpdateBuiltInFindVisuals()
@@ -549,25 +543,9 @@ public sealed partial class PaperWindow
 
     private void OnBuiltInFindOwnerDeactivated(object? sender, EventArgs e)
     {
-        if (!IsBuiltInFindOpen)
-        {
-            return;
-        }
-
-        _ = Dispatcher.BeginInvoke((Action)(() =>
-        {
-            if (!IsBuiltInFindOpen ||
-                _findHost?.IsKeyboardFocusWithin == true)
-            {
-                return;
-            }
-
-            HideBuiltInFind(restoreFocus: false);
-            if (!IsActive)
-            {
-                ScheduleExperimentalAutoCollapse(blockedAtDeactivation: false);
-            }
-        }), DispatcherPriority.ContextIdle);
+        // Use the same settled focus check as the popup input: a temporary deactivation while
+        // restoring a hidden paper must not dismiss find after its owner has reactivated.
+        QueueBuiltInFindPopupFocusExitCheck();
     }
 
     private void HookBuiltInFindContentChanges()
