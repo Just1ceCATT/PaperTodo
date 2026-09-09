@@ -186,6 +186,9 @@ public sealed partial class AppController
             RestoreSettingsSidebarGeneralDefaults);
     }
 
+    // This hint intentionally follows the same lightweight four-language path used by other
+    // settings-only labels. The old resource text described the previous "invisible but reserved"
+    // close strip and must not be surfaced after the geometry change.
     private string HideEdgeCapsuleCloseButtonOnHoverTip() =>
         SettingsSidebarLocalized(
             "开启后，普通边缘胶囊在悬停或激活时不显示关闭按钮，也不保留关闭区域；需要关闭时可在右键菜单中选择「隐藏」。",
