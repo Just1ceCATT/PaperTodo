@@ -156,10 +156,12 @@ internal static class Program
             var hovered = Plan(hoverModel, layout);
             Check(!resting.TitleVisible && hovered.TitleVisible, "Zero title appears only while expanded");
             Check(resting.HostBounds == hovered.HostBounds, "Reserve full title capacity before hover");
-            var expected = EdgeCapsuleGeometry.Calculate(new(monitor, edge, 40, 150, 28, 40));
+            var expectedCloseWidth = hiddenClose ? 0 : 28;
+            var expected = EdgeCapsuleGeometry.Calculate(new(monitor, edge, 40, 150, expectedCloseWidth, 40));
             Check(hovered.Bounds == expected.Bounds && hovered.InteractiveBounds == expected.InteractiveBounds,
-                "Visible width and hit region follow full title on target DPI/edge");
-            Check(hovered.CloseSegmentActsAsContent == hiddenClose, "Hidden close setting retained");
+                "Visible width and hit region remove the hidden close strip");
+            Check(!hovered.CloseSegmentActsAsContent,
+                "Hidden close mode leaves no invisible content segment");
             var transition = new EdgeCapsuleTransition(resting.ToFrame(), hovered, 0, 100,
                 EdgeCapsuleTransitionReason.Pointer);
             var previousWidth = resting.Bounds.Width;
@@ -182,8 +184,10 @@ internal static class Program
             Check(!ordinaryHover.TitleVisible && ordinaryHover.BodyWindowWidthDevice == resting.BodyWindowWidthDevice,
                 "Preview-enabled compact hover retains the configured title limit");
             var preview = Plan(hoverModel with { Preview = EdgeCapsulePreviewState.Open }, layout);
+            var expectedPreviewWidthDip = hiddenClose ? 260 - 28 : 260;
             Check(preview.Surface == EdgeCapsuleSurfaceKind.DockedPreview &&
-                preview.Bounds.Width == (int)Math.Round(260 * scale), "Preview card width stays independent");
+                preview.Bounds.Width == (int)Math.Round(expectedPreviewWidthDip * scale),
+                "Preview card removes hidden close-strip width only");
             var active = hoverModel with { State = hoverModel.State with { Visual = EdgeCapsuleVisualState.Active } };
             var handoff = Plan(active with { State = active.State with { Gesture = EdgeCapsuleGestureState.DockingHandoff } }, layout);
             var reveal = Plan(active with { State = active.State with { Gesture = EdgeCapsuleGestureState.DockingReveal } }, layout);
