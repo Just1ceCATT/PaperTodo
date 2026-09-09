@@ -101,7 +101,6 @@ internal static class MarkdownSemanticReveal
                     MarkdownSemanticSpanKind.SetextMarker or
                     MarkdownSemanticSpanKind.HorizontalRule or
                     MarkdownSemanticSpanKind.UnorderedListMarker or
-                    MarkdownSemanticSpanKind.OrderedListMarker or
                     MarkdownSemanticSpanKind.TaskListMarker or
                     MarkdownSemanticSpanKind.EscapeMarker) &&
                 RevealMarker(caret, lineZeroBased, span.Start, span.Length, span.Kind))
