@@ -352,7 +352,6 @@ public sealed partial class AppController
         {
             master.RefreshEffectiveTopmost();
         }
-        RefreshSettingsRegions("labs.dockedCapsule");
     }
 
     private void ToggleExperimentalEdgeCapsuleHoverPreview()
@@ -1007,16 +1006,6 @@ public sealed partial class AppController
 
         AddLabsMajorSection(
             rightColumn,
-            Strings.Get("LabsDockedCapsuleBehavior"),
-            BuildSettingsLiveRegion(
-                "labs.dockedCapsule",
-                BuildLabsDockedCapsuleBehaviorSettings));
-        AddLabsMajorSection(
-            rightColumn,
-            Strings.Get("LabsTodoReminders"),
-            BuildSettingsLiveRegion("labs.reminders", BuildLabsTodoReminderSettings));
-        AddLabsMajorSection(
-            rightColumn,
             Strings.Get("LabsMcp"),
             BuildSettingsLiveRegion("labs.mcp", BuildLabsMcpSettings));
         AddLabsMajorSection(
@@ -1063,30 +1052,12 @@ public sealed partial class AppController
         column.Children.Add(content);
     }
 
-
     private UIElement BuildLabsWindowCoordinationSettings()
     {
         var content = new StackPanel();
         content.Children.Add(BuildLabsWindowTetherSettings());
         content.Children.Add(BuildLabsCapsuleMagnetSettings());
         return content;
-    }
-
-    private UIElement BuildLabsDockedCapsuleBehaviorSettings()
-    {
-        var card = new Border
-        {
-            Background = Brushes.Transparent,
-            Padding = new Thickness(0, 3, 0, 5),
-            Margin = new Thickness(0, 1, 0, 3)
-        };
-        card.Child = WrapWithHint(
-            SettingsToggle(
-                Strings.Get("LabsDockedCapsulesNonTopmost"),
-                State.ExperimentalDockedCapsulesNonTopmost,
-                ToggleExperimentalDockedCapsulesNonTopmost),
-            "TipLabsDockedCapsulesNonTopmost");
-        return card;
     }
 
     private UIElement BuildLabsFocusBehaviorSettings()
@@ -1920,7 +1891,6 @@ public sealed partial class AppController
         State.ExperimentalCollapsePaperOnDeactivate = false;
         State.ExperimentalHideInactiveTopBarButtons = false;
         State.ExperimentalHideInactiveTitleBar = false;
-        State.ExperimentalDockedCapsulesNonTopmost = false;
         State.ExperimentalEdgeCapsuleHoverPreview = true;
         State.ExperimentalEdgeCapsuleHoverIntent = true;
         State.ExperimentalEdgeCapsuleHoverIntentSensitivity =
@@ -1928,13 +1898,6 @@ public sealed partial class AppController
         State.ExperimentalAllowLockIconUnlock = true;
         State.ExperimentalShortcutOpacityLevel = 0.35;
         ClearAdvancedShortcutRuntimeState();
-        State.ExperimentalTodoReminders = false;
-        State.ExperimentalTodoReminderShowButton = true;
-        State.ExperimentalTodoReminderQuickMinutes =
-            ExperimentalTodoReminderOptions.DefaultQuickMinutes;
-        State.ExperimentalTodoReminderSoundEnabled = false;
-        State.ExperimentalTodoReminderSound =
-            TodoReminderSoundOptions.Asterisk;
         State.McpEnabled = false;
         State.McpAllowBlankWrites = false;
         State.McpAllowFullWrites = false;
@@ -1956,14 +1919,9 @@ public sealed partial class AppController
 
         foreach (var window in _windows.Values.ToList())
         {
-            window.RefreshDeepCapsuleSlotTopmost();
             window.DisableExperimentalCapsuleMagnet();
             window.DisableExperimentalTetherVisibilityLink();
             window.DisableExperimentalWindowTether();
-        }
-        foreach (var master in _masterCapsules.Values.ToList())
-        {
-            master.RefreshEffectiveTopmost();
         }
         RefreshExperimentalWindowRuntime();
         RefreshEdgeCapsuleHoverIntentRuntime();
@@ -1971,7 +1929,6 @@ public sealed partial class AppController
         SaveNow();
         RefreshExperimentalOpacitySurfaces(animate: false);
         RefreshExperimentalFocusPresentationSurfaces();
-        RefreshTodoReminderFeature();
         RefreshSettingsWindowContent();
     }
 
@@ -2832,7 +2789,6 @@ public sealed partial class AppController
     {
         return max < min ? min : Math.Clamp(value, min, max);
     }
-
 
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
