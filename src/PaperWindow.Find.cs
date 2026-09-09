@@ -652,7 +652,7 @@ public sealed partial class PaperWindow
         {
             _findMatchIndex = -1;
             ClearAppliedFindSelection();
-            SynchronizeGlobalNoteFindState(query);
+            SynchronizeGlobalFindState(query);
             UpdateFindCount();
             return;
         }
@@ -678,7 +678,7 @@ public sealed partial class PaperWindow
             _findAppliedMatch = null;
             ReleaseTodoInactiveFindSelection();
         }
-        SynchronizeGlobalNoteFindState(query);
+        SynchronizeGlobalFindState(query);
         UpdateFindCount();
     }
 
@@ -732,49 +732,6 @@ public sealed partial class PaperWindow
             destination.Add(new PaperFindMatch(todoItemId, offset, query.Length));
             searchFrom = offset + query.Length;
         }
-    }
-
-    private void MoveFindMatch(int direction)
-    {
-        if (_findInput == null || string.IsNullOrEmpty(_findInput.Text))
-        {
-            return;
-        }
-
-        if (TryMoveGlobalNoteFindMatch(direction))
-        {
-            return;
-        }
-
-        var previous = TryGetCurrentFindMatch(out var current)
-            ? current
-            : (PaperFindMatch?)null;
-
-        _findMatches.Clear();
-        _findMatches.AddRange(ScanFindMatches(_findInput.Text));
-        if (_findMatches.Count == 0)
-        {
-            _findMatchIndex = -1;
-            ClearAppliedFindSelection();
-            UpdateFindCount();
-            return;
-        }
-
-        var currentIndex = previous is PaperFindMatch kept
-            ? _findMatches.IndexOf(kept)
-            : -1;
-        if (currentIndex < 0)
-        {
-            _findMatchIndex = direction >= 0 ? 0 : _findMatches.Count - 1;
-        }
-        else
-        {
-            _findMatchIndex =
-                (currentIndex + direction + _findMatches.Count) % _findMatches.Count;
-        }
-
-        ApplyCurrentFindMatch();
-        UpdateFindCount();
     }
 
     private bool TryGetCurrentFindMatch(out PaperFindMatch match)
@@ -909,7 +866,7 @@ public sealed partial class PaperWindow
             : 0;
         _findCountText.Text = BuiltInFindCountText(current, _findMatches.Count);
 
-        var enabled = HasBuiltInFindNavigationTarget();
+        var enabled = _globalFindMatches.Count > 0;
         if (_findPreviousButton != null)
         {
             _findPreviousButton.IsEnabled = enabled;
