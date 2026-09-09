@@ -874,15 +874,21 @@ public sealed partial class PaperWindow : Window
 
     private void ApplyDeferredStartupSystemVisibility()
     {
+        // A cold edge activation can start its form animation before Loaded's queued work.
+        // SourceInitialized already applied switcher state; form completion owns the taskbar.
+        if (IsPaperFormTransitioning)
+        {
+            return;
+        }
         var shouldShowInTaskbar = ShouldShowInTaskbar();
         ApplySystemVisibility(reapplyTaskbarShellState: ShowInTaskbar != shouldShowInTaskbar || !shouldShowInTaskbar);
     }
 
-    private bool ShouldShowInTaskbar()
+    private bool ShouldShowInTaskbar(bool? collapsed = null)
     {
         return !_controller.State.HidePapersFromWindowSwitcher &&
             !_controller.State.HidePapersFromTaskbar &&
-            !_paper.IsCollapsed;
+            !(collapsed ?? _paper.IsCollapsed);
     }
 
     private bool TryGetHiddenResizeHitTest(IntPtr hwnd, IntPtr lParam, out int hitTest)

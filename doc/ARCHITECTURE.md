@@ -157,6 +157,8 @@ PaperTodo 不提供插件热重载入口。插件 manifest、DLL、Web body/mini
 
 普通窗口 `X/Y/Width/Height` 与 Edge Capsule 的 queue / expanded recovery geometry 不是同一套状态，不能由 parked/hidden shell 相互覆盖。
 
+Edge 展开记忆保留原有窗口 DIP 字段，并用可选 `DeepCapsuleExpandedDpiScale` 记录捕获时的 HWND 缩放；队列 monitor/side 只标识记忆归属。恢复先还原物理矩形选屏，再以目标屏 DPI 计算尺寸，通过原生窗口边界和既有布局确认完成回位。旧数据缺少缩放信息时沿用系统 DPI 的兼容解释，不猜测其原屏幕；下一次真实展开窗口保存后补齐。
+
 `StateStore` 的方向是保守恢复与版本化写入：主文件失败后可从 backup 恢复；需要保护失败源时先保留证据再允许正常保存覆盖。保存阶段只修复序列化无效值，不重新解释业务不变量。
 
 全局 crash boundary 不执行普通“最后强行保存”。正常 durability 由常规保存、同步退出保存和 backup 提供。
