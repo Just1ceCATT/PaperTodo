@@ -52,11 +52,12 @@ internal static class EdgeCapsuleTargetPlanner
         var top = model.DockedDragTopDipOverride ??
             (retracted ? layout.MasterTopDip : layout.NormalTopDip);
 
-        // "Hide close button on hover" means there is no close segment at all. Keeping an empty
-        // segment would leave an invisible but still reserved strip on the inner edge of the pill.
+        // Preview is its own surface and keeps its close control. For the ordinary hover/active
+        // surface, "hide close button" means there is no close segment at all — not an invisible
+        // reserved strip that still makes the pill longer.
         var closeSegmentVisible =
-            (preview || expanded) &&
-            !layout.CloseSegmentActsAsContent;
+            preview ||
+            (expanded && !layout.CloseSegmentActsAsContent);
         var closeWidth = closeSegmentVisible
             ? layout.MaximumCloseWidthDip
             : 0;
@@ -64,8 +65,8 @@ internal static class EdgeCapsuleTargetPlanner
             ? layout.PreviewHeightDip
             : layout.HeightDip;
         var expandedWidth = Math.Max(layout.RestingWidthDip, layout.ExpandedWidthDip);
-        // PreviewWidthDip is the old total envelope (body + possible close strip). Keep the body
-        // width stable and remove only the close strip when that setting hides it.
+        // PreviewWidthDip remains the total preview envelope, so its body always excludes the
+        // preview close strip. Ordinary hover width uses ExpandedWidthDip as the body directly.
         var previewBodyWidth = Math.Max(
             1,
             layout.PreviewWidthDip - layout.MaximumCloseWidthDip);
