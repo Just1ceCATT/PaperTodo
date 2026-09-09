@@ -82,19 +82,27 @@ internal static class QuoteRailAlignmentChecks
             {
                 Near(firstRails[index], secondRails[index], message);
             }
-            if (!MarkdownSemanticPresentation.TryGetTextPoint(
-                    view, first, source.IndexOf('a'), VisualYPosition.TextMiddle, out var firstBody) ||
-                !MarkdownSemanticPresentation.TryGetTextPoint(
-                    view, second, source.IndexOf('b'), VisualYPosition.TextMiddle, out var secondBody))
-            {
-                throw new InvalidOperationException($"FAIL quote body position: {message}");
-            }
-            Near(firstBody.X, secondBody.X, message + " body alignment");
+            Near(BodyX(view, first, source.IndexOf('a')),
+                BodyX(view, second, source.IndexOf('b')), message + " body alignment");
         }
         if (box.Text != source || box.CanUndo)
         {
             throw new InvalidOperationException($"FAIL quote layout mutated source/history: {message}");
         }
+    }
+
+    private static double BodyX(TextView view, DocumentLine line, int offset)
+    {
+        var visual = view.GetOrConstructVisualLine(line);
+        var relative = offset - visual.FirstDocumentLine.Offset;
+        // A zero-source gutter shares an offset with the preceding space and following body.
+        // GetVisualPosition(source offset) may choose the preceding element's end; measure the
+        // actual body glyph instead, which is what this layout check promises to compare.
+        var body = visual.Elements.First(element =>
+            element.RelativeTextOffset <= relative &&
+            relative < element.RelativeTextOffset + element.DocumentLength);
+        return visual.GetVisualPosition(body.GetVisualColumn(relative), VisualYPosition.TextMiddle).X
+            - view.HorizontalOffset;
     }
 
     private static void Near(double expected, double actual, string message)
