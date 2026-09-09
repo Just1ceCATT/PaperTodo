@@ -1,5 +1,9 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Markup;
+using System.Windows.Media;
 using PaperTodo;
 
 internal static class Program
@@ -18,7 +22,9 @@ internal static class Program
             Console.WriteLine("PASS legacy-and-zero-persistence");
             Geometry();
             Console.WriteLine("PASS title-presentation-and-transition-geometry");
-            Console.WriteLine($"Edge title checks: 3/3 groups, {assertions} assertions passed.");
+            HostContentVisibility();
+            Console.WriteLine("PASS host-title-and-plugin-content-visibility");
+            Console.WriteLine($"Edge title checks: 4/4 groups, {assertions} assertions passed.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -69,6 +75,62 @@ internal static class Program
             Check(store.Load().DeepCapsuleTitleMeasureCharacterLimit == 0, "Missing legacy field remains unlimited");
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    private static void HostContentVisibility()
+    {
+        using var host = EdgeCapsuleHost.Create(new EdgeCapsuleHostOptions(
+            WindowChromeMargin: 4, ChromeCornerRadius: 16, InnerCornerRadius: 15,
+            OutlineThickness: 2, OutlineOverlap: 1, BodyHeight: 32,
+            LeftPadding: 6, IconGap: 4, IconText: "✓", IconFontSize: 13,
+            LabelFontSize: 12, LabelFontWeight: FontWeights.Normal, CloseToolTip: "Close",
+            PaperBrush: Brushes.White, PaperBorderBrush: Brushes.Gray, OutlineBrush: Brushes.Blue,
+            HoverBrush: Brushes.LightGray, IconBrush: Brushes.Gray,
+            StrongTextBrush: Brushes.Black, TextBrush: Brushes.Gray,
+            UiFontFamily: new FontFamily("Segoe UI"), SymbolFontFamily: new FontFamily("Segoe UI Symbol"),
+            Language: XmlLanguage.GetLanguage("en-US"), Topmost: false, DiagnosticId: "title-checks"));
+        TextBlock HostText(string name) => (TextBlock)typeof(EdgeCapsuleHost)
+            .GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+        var label = HostText("Label");
+        var icon = HostText("Icon");
+        Check(WindowWorkAreaHelper.TryGetMonitorGeometryForDevice(null, out var monitor), "Host test monitor");
+        var layout = new EdgeCapsuleLayoutSnapshot(monitor, EdgeCapsuleEdge.Right, 40, 10,
+            40, 28, 40, 178, 40, false, 1, null, ExpandedWidthDip: 150);
+        var model = EdgeCapsuleModel.Initial with
+        {
+            State = new EdgeCapsuleState(EdgeCapsuleSlotState.CollapsedDocked,
+                EdgeCapsuleVisualState.Resting, EdgeCapsuleGestureState.Idle, EdgeCapsuleOpenOrigin.Normal),
+            Placement = new EdgeCapsulePlacement(0, 0, 1)
+        };
+        var pluginContent = new TextBlock { Text = "Plugin clock", Background = Brushes.Transparent };
+        foreach (var hideTitle in new[] { false, true })
+        foreach (var hovered in new[] { false, true })
+        {
+            var frame = EdgeCapsuleTargetPlanner.Calculate(
+                model with { State = model.State with { Visual = hovered
+                    ? EdgeCapsuleVisualState.Hovered : EdgeCapsuleVisualState.Resting } },
+                layout with { HideRestingTitle = hideTitle }).Docked.ToFrame();
+            var expectedTitle = !hideTitle || hovered ? Visibility.Visible : Visibility.Collapsed;
+            host.SetLabel("Ordinary title", "Stored title");
+            host.SetPluginContent(pluginContent, "Plugin tooltip");
+            Check(host.Apply(frame), "Apply real host frame with plugin content");
+            Check(label.Visibility == Visibility.Collapsed && icon.Visibility == Visibility.Collapsed,
+                "Frame application must not reveal defaults beneath plugin content");
+            Check(pluginContent.IsVisible, "Custom plugin content remains visible");
+
+            host.SetPluginContent(null, null);
+            Check(label.Visibility == expectedTitle && icon.Visibility == Visibility.Visible,
+                "Removing plugin content restores defaults according to the applied title state");
+            Check(host.Apply(frame), "Apply ordinary host frame");
+            Check(label.Visibility == expectedTitle, "Ordinary frame honors title visibility");
+            // Theme/title refresh uses this sequence. There is deliberately no Apply afterwards:
+            // an unchanged target makes the presenter skip reapplying the frame.
+            host.SetLabel("Refreshed title", "Refreshed tooltip");
+            host.SetPluginContent(null, null);
+            Check(label.Visibility == expectedTitle && label.Text == "Refreshed title" &&
+                icon.Visibility == Visibility.Visible,
+                "Refreshing ordinary content preserves hidden titles without a new frame");
+        }
     }
 
     private static void Geometry()
