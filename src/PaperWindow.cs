@@ -223,9 +223,7 @@ public sealed partial class PaperWindow : Window
     // queue/display rearrangement deferred until the verified docked surface owns presentation.
     public bool IsDeepCapsuleReorderDragInProgress =>
         IsDeepCapsuleReordering || IsDeepCapsuleDockingReveal;
-    public bool SuppressGeometrySave =>
-        _suppressGeometrySave ||
-        _experimentalInactiveTitleBarCollapsed;
+    public bool SuppressGeometrySave => _suppressGeometrySave;
     internal string PaperId => _paper.Id;
     // Ordinary collapsed capsules are the main PaperWindow and should still save X/Y.
     // Deep capsules use the slot-host window for docked geometry, so the hidden/parked
@@ -916,6 +914,16 @@ public sealed partial class PaperWindow : Window
 
         var dpi = GetDpiForWindow(hwnd);
         var dpiScale = dpi > 0 ? dpi / 96.0 : 1.0;
+        if (_inactiveTitleBarMask is { HeaderOpacity: 0 } mask)
+        {
+            // Hidden chrome is absent from native hit testing too. Keep the resize edge
+            // on the visible body; HTTRANSPARENT alone cannot forward to another process.
+            bounds.Top += (int)Math.Round(mask.HeaderBottom * dpiScale);
+            if (pointerY < bounds.Top)
+            {
+                return false;
+            }
+        }
         var resizeBorder = Math.Max(1.0, WindowChromeMargin * dpiScale);
         var nearLeft = pointerX < bounds.Left + resizeBorder;
         var nearRight = pointerX >= bounds.Right - resizeBorder;
@@ -1138,6 +1146,7 @@ public sealed partial class PaperWindow : Window
             _paperChrome.Margin = new Thickness(0);
             _paperChrome.CornerRadius = new CornerRadius(0);
             RefreshPluginBodyClip();
+            RefreshExperimentalFocusPresentation(animate: false);
             return;
         }
 
@@ -1151,6 +1160,7 @@ public sealed partial class PaperWindow : Window
             ? CreatePaperChromeShadow(blurRadius: 8, opacity: 0.12, shadowDepth: 1)
             : CreatePaperChromeShadow();
         RefreshPluginBodyClip();
+        RefreshExperimentalFocusPresentation(animate: false);
     }
 
     private bool LooksSnappedNow()
@@ -1623,9 +1633,6 @@ public sealed partial class PaperWindow : Window
 
     public void UpdateTypography()
     {
-        var reapplyInactiveTitleBar =
-            BeginExperimentalInactiveTitleBarLayoutChange();
-
         FontFamily = AppTypography.UiFontFamily;
         FontSize = AppTypography.Scale(12);
         Language = AppTypography.Language;
@@ -1730,7 +1737,6 @@ public sealed partial class PaperWindow : Window
         RefreshPaperTitle();
         UpdateTopBarResponsiveLayout();
         ApplyCurrentCollapsedCapsuleWidth();
-        EndExperimentalInactiveTitleBarLayoutChange(reapplyInactiveTitleBar);
     }
 
     private void ApplyCurrentCollapsedCapsuleWidth()
