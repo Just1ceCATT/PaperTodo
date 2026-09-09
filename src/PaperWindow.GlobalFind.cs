@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Windows;
 using System.Windows.Threading;
 
 namespace PaperTodo;
@@ -141,45 +142,63 @@ public sealed partial class PaperWindow
             return true;
         }
 
-        ClearAppliedFindSelection();
-        HideBuiltInFind(restoreFocus: false);
         var targetWindow = _controller.OpenMarkdownFindTarget(target.PaperId);
         if (targetWindow == null)
         {
             return true;
         }
 
-        // A newly shown paper still has Loaded/system-visibility and Render work queued. Let
-        // that finish before opening/focusing its popup, otherwise the restore can take focus
-        // back or hide the popup. Do not reopen find if the user has already left the target.
+        // Keep the source search usable while the target finishes its queued show/layout work.
+        // In particular, a first-show taskbar refresh can leave the target inactive. Transfer
+        // focus only after that refresh, and close this popup only once the target accepts find.
+        _findInput.Focus();
         _ = targetWindow.Dispatcher.BeginInvoke((Action)(() =>
         {
-            if (targetWindow.IsClosed ||
-                !targetWindow.IsVisible ||
-                !targetWindow.IsActive ||
-                targetWindow._paper.IsCollapsed ||
-                !targetWindow.CanUseBuiltInFind())
+            if (!IsBuiltInFindOpen ||
+                !string.Equals(_findInput.Text, query, StringComparison.Ordinal) ||
+                (!IsActive &&
+                 _findHost?.IsKeyboardFocusWithin != true &&
+                 !targetWindow.IsActive))
             {
                 return;
             }
 
-            targetWindow.ShowBuiltInFindAtGlobalMatch(query, target);
+            if (!targetWindow.TryShowBuiltInFindAtGlobalMatch(query, target))
+            {
+                _findInput.Focus();
+                ApplyCurrentFindMatch();
+                return;
+            }
+
+            ClearAppliedFindSelection();
+            HideBuiltInFind(restoreFocus: false);
+            if (!IsActive)
+            {
+                ScheduleExperimentalAutoCollapse(blockedAtDeactivation: false);
+            }
         }), DispatcherPriority.Background);
-        if (!IsActive)
-        {
-            ScheduleExperimentalAutoCollapse(blockedAtDeactivation: false);
-        }
         return true;
     }
 
-    private void ShowBuiltInFindAtGlobalMatch(
+    private bool TryShowBuiltInFindAtGlobalMatch(
         string query,
         GlobalNoteFindMatch target)
     {
-        EnsureBuiltInFindPopup();
-        if (_findPopup == null || _findInput == null)
+        if (IsClosed ||
+            !IsVisible ||
+            WindowState == WindowState.Minimized ||
+            _paper.IsCollapsed ||
+            !CanUseBuiltInFind() ||
+            IsExperimentalPassive ||
+            _controller.FullscreenAvoidanceWindowFor(this) != IntPtr.Zero)
         {
-            return;
+            return false;
+        }
+
+        EnsureBuiltInFindPopup();
+        if (_findPopup == null || _findInput == null || !Activate())
+        {
+            return false;
         }
 
         SetBuiltInFindQuery(
@@ -188,7 +207,11 @@ public sealed partial class PaperWindow
         UpdateBuiltInFindVisuals();
         _findPopup.IsOpen = true;
         SynchronizeBuiltInFindOwnerState(refreshMatches: false);
-        _findInput.Focus();
+        if (!IsBuiltInFindOpen || !_findInput.Focus())
+        {
+            HideBuiltInFind(restoreFocus: false);
+            return false;
+        }
         _findInput.SelectAll();
 
         _ = Dispatcher.BeginInvoke((Action)(() =>
@@ -202,6 +225,7 @@ public sealed partial class PaperWindow
             UpdateFindCount();
             RepositionBuiltInFindPopup();
         }), DispatcherPriority.Background);
+        return true;
     }
 
     private string BuiltInFindCountText(int localCurrent, int localTotal)
