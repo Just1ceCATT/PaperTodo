@@ -78,6 +78,7 @@ internal sealed record EdgeCapsulePreviewContext(
     Func<string> ReadTitle,
     bool PaperExpanded,
     Func<string> ReadMarkdownText,
+    Func<string> ReadMarkdownRenderMode,
     Func<string, bool, bool> SetTodoDone,
     Func<string, bool> OpenTodoLinkedTarget,
     Func<Style> ReadTodoCheckStyle,

@@ -250,6 +250,7 @@ internal static partial class Program
         });
 
         RunLocalRedrawChecks(Check);
+        RunEdgePreviewChecks(Check);
 
         Console.WriteLine($"Markdown editing checks: {failures} failure(s).");
         return failures == 0 ? 0 : 1;
