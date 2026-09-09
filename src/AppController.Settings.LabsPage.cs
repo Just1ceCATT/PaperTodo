@@ -122,7 +122,7 @@ public sealed partial class AppController
             ExperimentalTetherVisibilityModes.Hide;
         RestoreLabsShortcutDefaults();
 
-        foreach (var window in _windows.Values.ToList())
+        foreach (var window in _windows.Values)
         {
             window.DisableExperimentalCapsuleMagnet();
             window.DisableExperimentalTetherVisibilityLink();
