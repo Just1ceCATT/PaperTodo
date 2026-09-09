@@ -154,7 +154,7 @@ public sealed partial class PaperWindow
         }), DispatcherPriority.Background);
     }
 
-    internal static void ScrollBuiltInFindOffsetIntoView(
+    internal static (int Line, int Column) GetBuiltInFindScrollTarget(
         MarkdownTextBox note,
         int absoluteOffset)
     {
@@ -162,12 +162,20 @@ public sealed partial class PaperWindow
         var document = note.Document;
         if (document == null)
         {
-            return;
+            return (1, 1);
         }
 
         var offset = Math.Clamp(absoluteOffset, 0, document.TextLength);
         var location = document.GetLocation(offset);
-        note.ScrollTo(location.Line, location.Column);
+        return (location.Line, location.Column);
+    }
+
+    internal static void ScrollBuiltInFindOffsetIntoView(
+        MarkdownTextBox note,
+        int absoluteOffset)
+    {
+        var target = GetBuiltInFindScrollTarget(note, absoluteOffset);
+        note.ScrollTo(target.Line, target.Column);
     }
 
     private void DisableBuiltInFindSelectionRevealTracking()
