@@ -691,6 +691,31 @@ public sealed partial class PaperWindow
 
         _paper.IsCollapsed = collapsed;
         RefreshExperimentalOpacity();
+        var expandedWidth = collapsed ? RoundToDevicePixelX(Width) : finalTargetWidth;
+        var expandedHeight = collapsed ? RoundToDevicePixelY(Height) : finalTargetHeight;
+        if (animate)
+        {
+            _transitionBaseWidth = expandedWidth;
+            _transitionBaseHeight = expandedHeight;
+            _startTransitionWidth = interruptedVisualWidth ?? (collapsed ? expandedWidth : capsuleWidth);
+            _startTransitionHeight = interruptedVisualHeight ?? (collapsed ? expandedHeight : PaperLayoutDefaults.CapsuleHeight);
+            _targetTransitionWidth = collapsed ? finalTargetWidth : expandedWidth;
+            _targetTransitionHeight = collapsed ? finalTargetHeight : expandedHeight;
+
+            // Establish the initial visual BEFORE native placement can resize the HWND and
+            // synchronously run WPF layout. Otherwise the full-size chrome is exposed first,
+            // then reset to capsule size when the expand animation starts.
+            _shell.Width = Math.Max(0, expandedWidth - WindowChromeInset);
+            _shell.Height = Math.Max(0, expandedHeight - WindowChromeInset);
+            TransitionProgress = 0.0;
+            UpdateTransitionVisuals(0.0);
+            if (!collapsed)
+            {
+                _shell.Opacity = 0.0;
+                _capsuleShell.Opacity = 1.0;
+            }
+        }
+
         if (!collapsed)
         {
             ChangeEdgeCapsulePaperForm(
@@ -780,21 +805,6 @@ public sealed partial class PaperWindow
 
         if (animate)
         {
-            var expandedWidth = collapsed ? RoundToDevicePixelX(Width) : finalTargetWidth;
-            var expandedHeight = collapsed ? RoundToDevicePixelY(Height) : finalTargetHeight;
-            _transitionBaseWidth = expandedWidth;
-            _transitionBaseHeight = expandedHeight;
-            _startTransitionWidth = interruptedVisualWidth ?? (collapsed ? expandedWidth : capsuleWidth);
-            _startTransitionHeight = interruptedVisualHeight ?? (collapsed ? expandedHeight : PaperLayoutDefaults.CapsuleHeight);
-            _targetTransitionWidth = collapsed ? finalTargetWidth : expandedWidth;
-            _targetTransitionHeight = collapsed ? finalTargetHeight : expandedHeight;
-
-            // Prevent shell content reflow/wrapping by locking its size to the expanded dimensions
-            _shell.Width = Math.Max(0, expandedWidth - WindowChromeInset);
-            _shell.Height = Math.Max(0, expandedHeight - WindowChromeInset);
-
-            TransitionProgress = 0.0;
-            UpdateTransitionVisuals(0.0);
             if (!collapsed)
             {
                 Width = expandedWidth;

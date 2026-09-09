@@ -501,10 +501,12 @@ public sealed partial class PaperWindow
             return false;
         }
 
-        // The shell was bootstrapped at the capsule's DPI. Commit the physical restore bounds,
-        // then use the existing post-layout confirmation to survive WPF's DPI/size transition.
-        QueueDeepCapsuleDeviceBoundsConfirmation(geometry.Bounds);
-        return true;
+        // Native placement selects the destination DPI. Settle WPF's logical size at that DPI
+        // before starting the form animation; a queued resize would compete with its frames.
+        Width = geometry.WidthDip;
+        Height = geometry.HeightDip;
+        UpdateLayout();
+        return TryApplyDeepCapsuleDeviceBounds(geometry.Bounds);
     }
 
     internal void ExpandForProgrammaticOpen(ProgrammaticPaperExpansionOrigin? programmaticOrigin = null)
