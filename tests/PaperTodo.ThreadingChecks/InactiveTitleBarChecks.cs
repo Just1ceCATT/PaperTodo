@@ -44,6 +44,8 @@ internal static partial class Program
             host.OpacityMask = null;
             var original = Render();
             host.OpacityMask = mask.MaskBrush;
+            mask.SetOpacity(1, 0);
+            var shown = Render();
             mask.SetOpacity(0, 0);
             var hidden = Render();
             var width = (int)Math.Ceiling(size.Width * scale);
@@ -54,6 +56,24 @@ internal static partial class Program
             // Skip only the shared antialiased boundary pixel; the rest of the body must
             // remain bit-for-bit identical, including its position and its lower shadow.
             var start = ((int)Math.Round(cutoff * scale) + 1) * width * 4;
+            if (!hidden.AsSpan(start).SequenceEqual(original.AsSpan(start)))
+            {
+                var different = 0;
+                var maximum = 0;
+                var first = -1;
+                for (var index = start; index < hidden.Length; index++)
+                {
+                    var difference = Math.Abs(hidden[index] - original[index]);
+                    if (difference == 0) continue;
+                    different++;
+                    maximum = Math.Max(maximum, difference);
+                    if (first < 0) first = index;
+                }
+                Console.WriteLine($"MASK DIFF scale={scale} size={size} count={different} max={maximum} " +
+                    $"first=({first / 4 % width},{first / 4 / width}) channel={first % 4} " +
+                    $"original={original[first]} shown={shown[first]} hidden={hidden[first]} " +
+                    $"shownMatchesHidden={shown.AsSpan(start).SequenceEqual(hidden.AsSpan(start))}");
+            }
             Assert(hidden.AsSpan(start).SequenceEqual(original.AsSpan(start)), "body pixels changed during title hiding");
             Assert(body.TranslatePoint(new Point(), host) == bodyPosition && body.RenderSize == bodySize,
                 "title hiding changed body layout");
