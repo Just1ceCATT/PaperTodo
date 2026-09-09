@@ -89,6 +89,9 @@ internal sealed class MarkdownPaperBodySession : IPaperBodySession
     internal IReadOnlyList<UIElement> PresenterElements =>
         _root.Children.Cast<UIElement>().ToArray();
 
+    internal void SetTransientFindReveal(int? absoluteOffset) =>
+        _semanticPresentation?.SetTransientFindReveal(absoluteOffset);
+
     internal void AddPresenter(UIElement presenter)
     {
         if (!_root.Children.Contains(presenter))
