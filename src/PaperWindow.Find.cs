@@ -5,7 +5,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
+using WpfPath = System.Windows.Shapes.Path;
 
 namespace PaperTodo;
 
@@ -22,7 +24,7 @@ public sealed partial class PaperWindow
     private Border? _findHost;
     private TextBox? _findInput;
     private TextBlock? _findCountText;
-    private TextBlock? _findDragHandle;
+    private Border? _findDragHandle;
     private Button? _findPreviousButton;
     private Button? _findNextButton;
     private readonly List<PaperFindMatch> _findMatches = [];
@@ -189,7 +191,7 @@ public sealed partial class PaperWindow
 
         var host = new Border
         {
-            Padding = new Thickness(4),
+            Padding = new Thickness(4, 4, 2, 4),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(RadiusControl),
             SnapsToDevicePixels = true,
@@ -279,27 +281,26 @@ public sealed partial class PaperWindow
         Grid.SetColumn(count, 1);
         row.Children.Add(count);
 
-        var previous = FindIconButton("↑", "Shift+Enter");
+        var previous = FindIconButton("M8,13 V3 M4,7 L8,3 L12,7", "Shift+Enter");
         previous.Click += (_, _) => MoveFindMatch(-1);
         Grid.SetColumn(previous, 2);
         row.Children.Add(previous);
 
-        var next = FindIconButton("↓", "Enter");
+        var next = FindIconButton("M8,3 V13 M4,9 L8,13 L12,9", "Enter");
         next.Click += (_, _) => MoveFindMatch(1);
         Grid.SetColumn(next, 3);
         row.Children.Add(next);
 
-        var close = FindIconButton("×", "Esc");
+        var close = FindIconButton("M4,4 L12,12 M12,4 L4,12", "Esc");
         close.Click += (_, _) => HideBuiltInFind(restoreFocus: true);
         Grid.SetColumn(close, 4);
         row.Children.Add(close);
 
-        var dragHandle = new TextBlock
+        var dragHandle = new Border
         {
-            Text = "⠿",
-            FontFamily = new System.Windows.Media.FontFamily("Segoe UI Symbol"),
-            TextAlignment = TextAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
         };
         Grid.SetColumn(dragHandle, 5);
         row.Children.Add(dragHandle);
@@ -388,9 +389,27 @@ public sealed partial class PaperWindow
         UpdateFindCount();
     }
 
-    private static Button FindIconButton(string glyph, string tooltip)
+    private static Button FindIconButton(string pathData, string tooltip)
     {
-        var button = IconButton(glyph, tooltip);
+        var button = IconButton("", tooltip);
+        var geometry = Geometry.Parse(pathData);
+        geometry.Freeze();
+        var icon = new WpfPath
+        {
+            Data = geometry,
+            Width = 16,
+            Height = 16,
+            StrokeThickness = 1.4,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round
+        };
+        icon.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, CreateForegroundBinding(button));
+        button.Content = new Viewbox
+        {
+            Child = icon,
+            IsHitTestVisible = false
+        };
         button.Padding = new Thickness(0);
         button.Margin = new Thickness(1, 0, 0, 0);
         button.Focusable = false;
@@ -440,7 +459,9 @@ public sealed partial class PaperWindow
                 FindPopupBaseWidth * AppTypography.ScaleFactor,
                 236,
                 420));
-        _findHost.Padding = new Thickness(AppTypography.Scale(4));
+        _findHost.Padding = new Thickness(
+            AppTypography.Scale(4), AppTypography.Scale(4),
+            AppTypography.Scale(2), AppTypography.Scale(4));
 
         _findInput.Foreground = TextBrush;
         _findInput.CaretBrush = TextBrush;
@@ -467,9 +488,11 @@ public sealed partial class PaperWindow
 
         if (_findDragHandle != null)
         {
-            _findDragHandle.Foreground = WeakTextBrush;
-            _findDragHandle.FontSize = AppTypography.Scale(16);
-            _findDragHandle.Width = AppTypography.FitChrome(20);
+            _findDragHandle.Background = WeakTextBrush;
+            _findDragHandle.Width = AppTypography.Scale(2);
+            _findDragHandle.Height = AppTypography.Scale(11);
+            _findDragHandle.CornerRadius = new CornerRadius(AppTypography.Scale(1));
+            _findDragHandle.Margin = new Thickness(AppTypography.Scale(6), 0, 0, 0);
         }
 
         UpdateFindButtonMetrics(_findPreviousButton);
@@ -495,6 +518,11 @@ public sealed partial class PaperWindow
         button.MinWidth = size;
         button.MinHeight = size;
         button.FontSize = AppTypography.Scale(11.5);
+        if (button.Content is Viewbox icon)
+        {
+            icon.Width = AppTypography.Scale(16);
+            icon.Height = AppTypography.Scale(16);
+        }
     }
 
     private bool BuiltInFindVisualsNeedRefresh()
