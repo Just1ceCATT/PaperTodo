@@ -160,6 +160,37 @@ internal static partial class Program
                 "destination backslash is visible when any part of the link is being edited");
         });
 
+        Check("Ordered markers stay native through preview and animated editing", () =>
+        {
+            foreach (var source in new[] { "1. item", "10) item" })
+            {
+                using var editor = new Editor(source);
+                var box = editor.Box;
+                box.SetMarkdownEditAnimationEnabled(true);
+                var snapshot = MarkdownSemanticSnapshot.Parse(source);
+                Require(!MarkdownSemanticReveal.HasRevealOnLine(
+                    snapshot, source, 0, 0, new MarkdownCaretReveal(source.Length, 0)),
+                    "plain ordered item does not start a syntax fade");
+                foreach (var mode in new[] { MarkdownRenderModes.Full, MarkdownRenderModes.Enhanced })
+                {
+                    box.SetMarkdownRenderMode(mode);
+                    foreach (var preview in new[] { true, false, true })
+                    {
+                        box.SetPreviewMode(preview);
+                        box.CaretOffset = source.Length;
+                        Pump();
+                        Equal(byte.MaxValue, ForegroundAlphaAtOffset(box, 0), "source number stays visible");
+                        var view = box.TextArea.TextView;
+                        var drawing = new DrawingGroup();
+                        using (var context = drawing.Open())
+                            foreach (var renderer in view.BackgroundRenderers)
+                                renderer.Draw(view, context);
+                        Require(drawing.Bounds.IsEmpty, "ordered item needs no painted replacement");
+                    }
+                }
+            }
+        });
+
         Check("Quote marker after a list marker hides and reveals with the quote", () =>
         {
             const string source = "- > item";
