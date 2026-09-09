@@ -184,10 +184,9 @@ internal static class Program
             Check(!ordinaryHover.TitleVisible && ordinaryHover.BodyWindowWidthDevice == resting.BodyWindowWidthDevice,
                 "Preview-enabled compact hover retains the configured title limit");
             var preview = Plan(hoverModel with { Preview = EdgeCapsulePreviewState.Open }, layout);
-            var expectedPreviewWidthDip = hiddenClose ? 260 - 28 : 260;
             Check(preview.Surface == EdgeCapsuleSurfaceKind.DockedPreview &&
-                preview.Bounds.Width == (int)Math.Round(expectedPreviewWidthDip * scale),
-                "Preview card removes hidden close-strip width only");
+                preview.Bounds.Width == (int)Math.Round(260 * scale),
+                "Preview card keeps its independent close segment");
             var active = hoverModel with { State = hoverModel.State with { Visual = EdgeCapsuleVisualState.Active } };
             var handoff = Plan(active with { State = active.State with { Gesture = EdgeCapsuleGestureState.DockingHandoff } }, layout);
             var reveal = Plan(active with { State = active.State with { Gesture = EdgeCapsuleGestureState.DockingReveal } }, layout);
