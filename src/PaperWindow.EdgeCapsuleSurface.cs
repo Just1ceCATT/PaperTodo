@@ -358,7 +358,7 @@ public sealed partial class PaperWindow
                     return;
                 }
 
-                _ = TryApplyDeepCapsuleDeviceBounds(bounds);
+                MoveWindowWithoutGeometrySave(() => _ = TryApplyDeepCapsuleDeviceBounds(bounds));
             }),
             System.Windows.Threading.DispatcherPriority.Render);
     }
@@ -424,30 +424,26 @@ public sealed partial class PaperWindow
 
         var rawTargetWidth = Math.Max(_paper.Width, PaperLayoutDefaults.MinWidth);
         var rawTargetHeight = Math.Max(_paper.Height, PaperLayoutDefaults.MinHeight);
-        Rect? rememberedDeepCapsuleExpandedGeometry = null;
+        PaperRestoreGeometry? rememberedDeepCapsuleExpandedGeometry = null;
         if (alignToDockedEdge &&
             ExpandedFromDeepCapsuleEdge &&
             _controller.TryGetRememberedDeepCapsuleExpandedGeometry(_paper, rawTargetWidth, rawTargetHeight, out var rememberedGeometry))
         {
             rememberedDeepCapsuleExpandedGeometry = rememberedGeometry;
-            rawTargetWidth = rememberedGeometry.Width;
-            rawTargetHeight = rememberedGeometry.Height;
+            rawTargetWidth = rememberedGeometry.WidthDip;
+            rawTargetHeight = rememberedGeometry.HeightDip;
         }
 
-        var targetWidth = RoundToDevicePixelX(rawTargetWidth);
-        var targetHeight = RoundToDevicePixelY(rawTargetHeight);
+        var targetWidth = rememberedDeepCapsuleExpandedGeometry?.WidthDip ?? RoundToDevicePixelX(rawTargetWidth);
+        var targetHeight = rememberedDeepCapsuleExpandedGeometry?.HeightDip ?? RoundToDevicePixelY(rawTargetHeight);
         MoveWindowWithoutGeometrySave(() =>
         {
             Width = targetWidth;
             Height = targetHeight;
             if (alignToDockedEdge)
             {
-                if (rememberedDeepCapsuleExpandedGeometry is Rect rememberedRect)
-                {
-                    Left = RoundToDevicePixelX(rememberedRect.Left);
-                    Top = RoundToDevicePixelY(rememberedRect.Top);
-                }
-                else
+                if (rememberedDeepCapsuleExpandedGeometry is not PaperRestoreGeometry rememberedPlacement ||
+                    !TryApplyRememberedDeepCapsuleExpandedGeometry(rememberedPlacement))
                 {
                     var requiredEdgeInset = _controller.State.ShowDeepCapsuleWhileExpanded && _controller.CanPaperDisplayAsCapsule(_paper)
                         ? ExpandedDeepCapsuleVisibleWidth() + DeepCapsuleGap
@@ -484,14 +480,30 @@ public sealed partial class PaperWindow
             return false;
         }
 
-        MarkEdgeCapsuleOpenedFromEdge();
+        var applied = false;
         MoveWindowWithoutGeometrySave(() =>
         {
-            Left = RoundToDevicePixelX(rememberedGeometry.Left);
-            Top = RoundToDevicePixelY(rememberedGeometry.Top);
-            Width = RoundToDevicePixelX(rememberedGeometry.Width);
-            Height = RoundToDevicePixelY(rememberedGeometry.Height);
+            applied = TryApplyRememberedDeepCapsuleExpandedGeometry(rememberedGeometry);
         });
+        if (!applied)
+        {
+            return false;
+        }
+        MarkEdgeCapsuleOpenedFromEdge();
+        return true;
+    }
+
+    private bool TryApplyRememberedDeepCapsuleExpandedGeometry(PaperRestoreGeometry geometry)
+    {
+        _deepCapsuleDevicePlacementGeneration++;
+        if (!TryApplyDeepCapsuleDeviceBounds(geometry.Bounds))
+        {
+            return false;
+        }
+
+        // The shell was bootstrapped at the capsule's DPI. Commit the physical restore bounds,
+        // then use the existing post-layout confirmation to survive WPF's DPI/size transition.
+        QueueDeepCapsuleDeviceBoundsConfirmation(geometry.Bounds);
         return true;
     }
 

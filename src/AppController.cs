@@ -2449,11 +2449,11 @@ public sealed partial class AppController : IDisposable
         MarkDirty();
     }
 
-    public bool TryGetRememberedDeepCapsuleExpandedGeometry(
+    internal bool TryGetRememberedDeepCapsuleExpandedGeometry(
         PaperData paper,
         double fallbackWidth,
         double fallbackHeight,
-        out Rect geometry)
+        out PaperRestoreGeometry geometry)
     {
         geometry = default;
         if (!State.RememberDeepCapsuleExpandedPosition ||
@@ -2499,42 +2499,36 @@ public sealed partial class AppController : IDisposable
             paper.DeepCapsuleExpandedY.Value,
             rememberedWidth,
             rememberedHeight);
-        var area = WindowWorkAreaHelper.WorkAreaFor(rememberedRect);
-        if (area.Width <= 0 || area.Height <= 0)
+        // Old data did not capture DPI and cannot disambiguate every mixed-DPI position.
+        // Keep its system-DPI interpretation until a real expanded HWND supplies a new snapshot.
+        var savedScale = paper.DeepCapsuleExpandedDpiScale is double scale && double.IsFinite(scale) && scale > 0
+            ? scale
+            : WindowWorkAreaHelper.SystemDpiScale().ScaleX;
+        if (!PaperRestoreGeometry.TryGetDeviceBounds(rememberedRect, savedScale, out var deviceBounds) ||
+            !WindowWorkAreaHelper.TryGetMonitorGeometryForDeviceBounds(deviceBounds, out var monitor))
         {
             return false;
         }
 
-        const double margin = 8;
-        var width = ClampPaperDimension(
-            rememberedWidth,
-            fallbackWidth,
-            PaperLayoutDefaults.MinWidth,
-            Math.Max(PaperLayoutDefaults.MinWidth, area.Width - (margin * 2)));
-        var height = ClampPaperDimension(
-            rememberedHeight,
-            fallbackHeight,
-            PaperLayoutDefaults.MinHeight,
-            Math.Max(PaperLayoutDefaults.MinHeight, area.Height - (margin * 2)));
-        var minX = area.Left + margin;
-        var maxX = Math.Max(minX, area.Right - width - margin);
-        var minY = area.Top + margin;
-        var maxY = Math.Max(minY, area.Bottom - height - margin);
-
-        geometry = new Rect(
-            Math.Round(Math.Clamp(paper.DeepCapsuleExpandedX.Value, minX, maxX)),
-            Math.Round(Math.Clamp(paper.DeepCapsuleExpandedY.Value, minY, maxY)),
-            Math.Round(width),
-            Math.Round(height));
+        geometry = PaperRestoreGeometry.ClampToMonitor(deviceBounds, rememberedWidth, rememberedHeight, monitor);
         return true;
     }
 
     private void UpdateDeepCapsuleExpandedGeometry(PaperData paper, Window window)
     {
-        paper.DeepCapsuleExpandedX = Math.Round(window.Left);
-        paper.DeepCapsuleExpandedY = Math.Round(window.Top);
-        paper.DeepCapsuleExpandedWidth = Math.Round(Math.Max(window.ActualWidth > 0 ? window.ActualWidth : window.Width, PaperLayoutDefaults.MinWidth));
-        paper.DeepCapsuleExpandedHeight = Math.Round(Math.Max(window.ActualHeight > 0 ? window.ActualHeight : window.Height, PaperLayoutDefaults.MinHeight));
+        if (!WindowNative.TryGetWindowDeviceBounds(window, out var bounds) ||
+            !WindowWorkAreaHelper.TryGetMonitorGeometryForWindowHandle(
+                new System.Windows.Interop.WindowInteropHelper(window).Handle, out var monitor))
+        {
+            return;
+        }
+
+        var scale = monitor.DpiScaleX;
+        paper.DeepCapsuleExpandedX = bounds.Left / scale;
+        paper.DeepCapsuleExpandedY = bounds.Top / scale;
+        paper.DeepCapsuleExpandedWidth = Math.Max(bounds.Width / scale, PaperLayoutDefaults.MinWidth);
+        paper.DeepCapsuleExpandedHeight = Math.Max(bounds.Height / scale, PaperLayoutDefaults.MinHeight);
+        paper.DeepCapsuleExpandedDpiScale = scale;
         paper.DeepCapsuleExpandedSide = DeepCapsuleSides.Normalize(paper.CapsuleSide);
         paper.DeepCapsuleExpandedMonitorDeviceName = WindowWorkAreaHelper.NormalizeQueueMonitorDeviceName(paper.CapsuleMonitorDeviceName);
         MarkDirty();

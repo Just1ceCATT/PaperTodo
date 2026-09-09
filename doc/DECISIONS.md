@@ -227,6 +227,8 @@ Edge capsule 同时存在单纸片状态与跨纸片会话。若 `PaperWindow`�
 
 最危险的一类 edge bug 来自“每个窗口都能从邻居/当前 HWND 猜一次队列位置”和“多个路径复制像素取整公式”。PerMonitorV2、多 DPI、左右墙和跨屏环境会把这类复制放大成 1px/一帧分歧。
 
+展开位置记忆也不能把 `Window.Left/Top` 当成系统 DPI 坐标：PMv2 下它们属于该 HWND 的缩放空间。仅改成按记忆矩形选屏仍会在混合 DPI 下误判；必须记录保存时的缩放，先还原物理矩形，再按目标屏 DPI 恢复。缺少缩放的旧数据无法唯一反推原屏幕，兼容读取不能假装已经完成精确迁移（#231）。
+
 分页还会把纯 placement 升级成可变 visibility/state ownership，为 reorder、preview corridor、drag 和 master offset 增加另一套隐藏状态。
 
 ### Rejected / Do not reintroduce

@@ -676,18 +676,18 @@ public sealed partial class PaperWindow
             && usesDeepCapsuleMode
             && ExpandedFromDeepCapsuleEdge
             && !_controller.State.ShowDeepCapsuleWhileExpanded;
-        Rect? rememberedDeepCapsuleExpandedGeometry = null;
+        PaperRestoreGeometry? rememberedDeepCapsuleExpandedGeometry = null;
         // An explicit open origin outranks edge history; edge-driven expansion still restores it.
         if (programmaticOrigin == null &&
             expandingFromDeepCapsuleEdge &&
             _controller.TryGetRememberedDeepCapsuleExpandedGeometry(_paper, targetWidth, targetHeight, out var rememberedGeometry))
         {
             rememberedDeepCapsuleExpandedGeometry = rememberedGeometry;
-            targetWidth = rememberedGeometry.Width;
-            targetHeight = rememberedGeometry.Height;
+            targetWidth = rememberedGeometry.WidthDip;
+            targetHeight = rememberedGeometry.HeightDip;
         }
-        double finalTargetWidth = RoundToDevicePixelX(targetWidth);
-        double finalTargetHeight = RoundToDevicePixelY(targetHeight);
+        double finalTargetWidth = rememberedDeepCapsuleExpandedGeometry?.WidthDip ?? RoundToDevicePixelX(targetWidth);
+        double finalTargetHeight = rememberedDeepCapsuleExpandedGeometry?.HeightDip ?? RoundToDevicePixelY(targetHeight);
 
         _paper.IsCollapsed = collapsed;
         RefreshExperimentalOpacity();
@@ -713,12 +713,8 @@ public sealed partial class PaperWindow
                     : 0;
                 MoveWindowWithoutGeometrySave(() =>
                 {
-                    if (rememberedDeepCapsuleExpandedGeometry is Rect rememberedRect)
-                    {
-                        Left = RoundToDevicePixelX(rememberedRect.Left);
-                        Top = RoundToDevicePixelY(rememberedRect.Top);
-                    }
-                    else
+                    if (rememberedDeepCapsuleExpandedGeometry is not PaperRestoreGeometry rememberedPlacement ||
+                        !TryApplyRememberedDeepCapsuleExpandedGeometry(rememberedPlacement))
                     {
                         AlignExpandedToDockedEdge(finalTargetWidth, finalTargetHeight, requiredEdgeInset);
                     }
