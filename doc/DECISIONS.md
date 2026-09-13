@@ -48,6 +48,7 @@
 | D-033 | 有界预览重段落使用共享 STA 排版 | Superseded by D-035 | Edge performance |
 | D-034 | 整体预热保留不可变绘制结果，不缓存隐藏 WPF 正文 | Superseded by D-035 | Edge performance / lifecycle |
 | D-035 | 冷渲染与预热共用唯一 artifact renderer | Accepted | Edge structure / lifecycle |
+| D-036 | 正式分发保持两档单文件且不增加 ReadyToRun 变体 | Accepted | 启动性能 / 发布 |
 
 ## 维护规则
 
@@ -1296,3 +1297,61 @@ D-034 去掉隐藏正文缓存，但保留冷 WPF renderer 与热 artifact rende
 ### Why / Evidence
 
 统一的价值在删除重复 ownership 和块生成规则，不是以压缩行数、拆文件或移到测试目录伪装精简。#251 的 `868c81e6` 是双 renderer 对照，`1b8844d6` 是已验证统一实现；结构统计、同机成对性能与验证日志见 `tests/PaperTodo.EdgePreviewChecks/PRELOAD.md`。当前入口为 `src/EdgeCapsulePreview.Markdown.cs`、`src/EdgeCapsulePreview.Markdown.Artifact.cs` 与 `src/EdgeCapsulePreview.Preload.cs`；回归集中在 `CompletionChecks`、`ArtifactRenderingChecks`、`PreloadChecks` 和 worker/Host 检查。D-033 的共享 STA 与 D-034 的不可变缓存原则沿用，被替代的是分段控件桥和永久双 renderer。
+
+---
+
+## D-036 — 正式分发保持两档单文件且不增加 ReadyToRun 变体
+
+**Status:** Accepted
+
+### Context
+
+PaperTodo 的 Windows Release 同时提供 self-contained 与 framework-dependent 单文件。2026-07 的提交 `feb311cdf712d24f5b7cefb023a0f7d87150004d` 曾关闭 `PublishReadyToRun`，当时直接原因是单文件体积显著膨胀。2026-09 在 .NET 10 上重新做了端到端 A/B，避免继续只依赖旧版本经验。
+
+本轮以 10 个已折叠 Edge Note 为固定工作集，在同一 Windows Server 2025 runner 上比较 8 种发布形态。每种形态执行 3 组 fresh/warm 新进程样本；外部计时从 `CreateProcess` 开始，进程内记录最早 module initializer、`App.OnStartup`、`AppController`、surface restore、WPF `CompositionTarget.Rendering`，最后用 `DwmFlush` 作为“已提交到 DWM”的边界。该边界不是物理显示器真正扫描出像素的时间，也不是用户机器的绝对性能保证。
+
+#255 随后补测了 SC/FD multi-file R2R 的启动、工作集与真实 ZIP 体积，并实际验证两个 ZIP 均可解压运行。将这些数据与现有 FD single-file no-R2R 放回同一用户选择后，R2R 的技术收益不足以支撑新增分发变体，因此本条决策从“正式单文件关闭 R2R”进一步收紧为“正式分发保持两档 no-R2R 单文件”。
+
+### Decision
+
+- 正式 self-contained + single-file + compression 发布继续使用 `PublishReadyToRun=false`。
+- framework-dependent 单文件也保持 `PublishReadyToRun=false`；它本身已经承担“更小、更快、需要 .NET”的用户选择，不再为 R2R 增加第三/第四种正式包。
+- 不新增 self-contained / framework-dependent 的 R2R 多文件 ZIP 或 R2R 单文件作为正式打包选项。ReadyToRun 本身不列为永久禁用能力；若未来改成安装器、多文件部署、NativeAOT 或显著改变 host/运行时版本，应重新 A/B。
+
+### Why
+
+当前正式形态（self-contained + single-file + compression）在本轮中：
+
+- no-R2R EXE 约 80.2 MiB；fresh `CreateProcess -> DwmFlush` 中位约 1452 ms，warm 约 1415 ms；最早托管入口约 302 ms；ready 时 working set 约 235 MB。
+- R2R EXE 约 106.1 MiB（约 +32%）；fresh `CreateProcess -> DwmFlush` 约 1470 ms，warm 约 1493 ms；最早托管入口约 658 ms（约 +118%）；working set 约 279 MB（约 +19%）。
+
+因此在当前正式单文件压缩组合中，R2R 不仅没有带来端到端启动收益，还把主要额外成本推到了最早托管代码之前。该 probe 无法仅凭这些时间点把这段成本进一步归因到 host、bundle 映射、解压或 loader 的某一个内部步骤，因此长期结论只写“当前组合负优化”，不臆测具体内部原因。
+
+R2R 本身仍然有效：self-contained 多文件的 fresh DWM 中位约 1501 -> 1100 ms（约 -27%），framework-dependent 单文件约 1193 -> 1041 ms（约 -13%）。但产品决策不能只和“同形态 no-R2R”比较：现有 FD single-file no-R2R 已经约 1193/1162 ms、约 17.2 MiB。相对这档真实用户选择，SC multi-file + R2R 在同一矩阵只再快约 93 ms Fresh / 84 ms Warm，却需要约 229 MiB 多文件目录；FD single-file + R2R 则把体积放大到约 50.1 MiB，Warm 只再快约 75 ms。#255 后续补测还证明 FD multi-file R2R 与 FD single-file R2R 基本同档，说明 R2R 技术有效，但没有产生新的用户分发档位。
+
+单文件压缩本身也做了对照：关闭压缩把 self-contained 单文件从约 80.2 MiB 放大到约 192.0 MiB（约 +139%），fresh DWM 只从约 1452 降到约 1416 ms。当前不为约几十毫秒的 runner 差异把正式完整包扩大到两倍以上。
+
+FD no-runtime 的 Windows SDK 定向压缩另做了 12 轮交错 A/B。`PaperTodoCompressWindowsSdk=true` 将本轮 EXE 从约 32.99 MiB 压到 16.27 MiB（约 -50.7%）；Command Ready 中位 928.01 -> 924.29 ms，DWM 952.79 -> 939.14 ms，配对差异的 IQR 均跨过 0，working set 只差约 0.07 MiB。这里不能宣称压缩更快，但没有测到可证明的启动/内存回退，因此 framework-dependent 包继续默认启用这项定向压缩。它与 self-contained 的 `EnableCompressionInSingleFile` 是两条不同压缩路径。
+
+### Rejected / Pitfalls
+
+- 不因为“R2R 理论上减少 JIT”就在当前 single-file/compressed Release 中直接打开；先看端到端 `CreateProcess -> presentation` 数据。
+- 不把“R2R 在当前正式组合负优化”扩张成“R2R 永远更慢”。多文件/FDD 对照已经证明不同打包边界下结论会反转。
+- 不把 CI runner 的 DWM 数字当成用户机器的绝对启动时长；它只用于同机同轮相对比较。
+- 不用一次 publish 耗时判断运行时性能；R2R/压缩产物会受到增量构建和缓存顺序影响，长期决策看运行样本和产物体积。
+
+### Consequences
+
+- `.github/workflows/release.yml` 中的 `PublishReadyToRun=false` 是有实测依据的发布决策，不应在普通“启动优化”中随手改回 true。
+- 若继续优化冷启动，优先测 PaperTodo 自身 `AppController` / PaperWindow / Edge Host 与单文件 host 的真实阶段，而不是先假设 JIT 是主瓶颈。
+- framework-dependent no-R2R 单文件继续作为对启动速度敏感且已安装匹配 .NET Runtime 用户的轻量选择；当前不再把“是否单独启用 R2R”作为待选正式分发方案。
+
+### Evidence
+
+- benchmark workflow run `34723619518`，commit `524b3fd9ce1eb6bb388a1c6ffab81caef32cfd88`：8 种发布形态、48 个 fresh/warm 启动样本，最终 job 成功。
+- benchmark artifact `cold-start-packaging-benchmark`：`summary.csv` / `startup-samples.csv` / `publish-results.csv`。
+- `feb311cdf712d24f5b7cefb023a0f7d87150004d`：历史上因单文件体积膨胀关闭 ReadyToRun。
+- `.github/workflows/release.yml`：当前正式 self-contained / framework-dependent 单文件发布参数。
+- #255 补测：Actions run `34728040332`（启动/工作集）与 `34728463445`（未插桩 R2R ZIP 打包验证）；原始打包 PR 在数据吸收进 E-001 后关闭，不进入正式分发。
+- FD Windows SDK 定向压缩补测：Actions run `34758652475`，实验 HEAD `7f33460c11f99ed87074b270144aa484366b92d7`；12 轮/形态交错 A/B，原始 samples/summary/publish CSV 长期保存在 `doc/experiments/E-001-fd-sdk-compression-*.csv`。
+
