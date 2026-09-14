@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace PaperTodo;
 
-public sealed class StateStore
+public sealed partial class StateStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerOptions.Strict)
     {
@@ -52,20 +52,25 @@ public sealed class StateStore
 
         if (!mainExists && !backupExists)
         {
-            return new AppState();
+            var empty = new AppState();
+            RememberLoadedReloadState(empty, null, null);
+            return empty;
         }
 
+        byte[]? primaryBytes = null;
         Exception? mainEx = null;
         if (mainExists)
         {
             try
             {
-                var json = File.ReadAllText(FilePath);
+                primaryBytes = File.ReadAllBytes(FilePath);
+                var json = DecodeStateBytes(primaryBytes);
                 var state = JsonSerializer.Deserialize<AppState>(json, JsonOptions);
                 if (state != null)
                 {
                     MigrateLegacyTopBarSettings(state, json);
                     NormalizeAfterLoad(state);
+                    RememberLoadedReloadState(state, primaryBytes, json);
                     return state;
                 }
 
@@ -93,6 +98,7 @@ public sealed class StateStore
 
                     MigrateLegacyTopBarSettings(state, json);
                     NormalizeAfterLoad(state);
+                    RememberLoadedReloadState(state, primaryBytes, json);
                     return state;
                 }
 
@@ -128,6 +134,7 @@ public sealed class StateStore
 
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var hasPersistedState = FileExistsForCollection(FilePath);
+            AddIfExists(paths, FilePath); // pending external edits can reference images absent from memory
             AddIfExists(paths, BackupPath);
             AddIfExists(paths, FilePath + ".tmp");
 
@@ -135,6 +142,15 @@ public sealed class StateStore
             if (string.IsNullOrWhiteSpace(directory))
             {
                 directory = AppContext.BaseDirectory;
+            }
+
+            foreach (var path in Directory.EnumerateFiles(directory, "dataconflict(*).json"))
+            {
+                paths.Add(path);
+            }
+            foreach (var path in Directory.EnumerateFiles(directory, "data.unsaved_exit.*.json"))
+            {
+                paths.Add(path);
             }
 
             foreach (var path in Directory.EnumerateFiles(directory, "data.failed_load.*.json"))
@@ -281,6 +297,7 @@ public sealed class StateStore
             // If startup recovered from backup, keep both recovery sources untouched until a
             // successful normal save has preserved them under timestamped recovery names.
             if (_preserveRecoveredLoadFilesOnNextSave ||
+                (_reloadTracking && !DiskMatches(_reloadAcceptedBytes)) ||
                 !TryReadValidatedStateBytes(FilePath, out var primaryBytes))
             {
                 return false;
@@ -313,7 +330,8 @@ public sealed class StateStore
     private void WriteJsonInternal(string json)
     {
         var preserveRecoverySources = PreserveRecoveredLoadFilesIfNeeded();
-        _atomicWriter.Write(FilePath, Encoding.UTF8.GetBytes(json));
+        if (_reloadTracking) WriteTrackedJson(json, _reloadAcceptedBytes);
+        else _atomicWriter.Write(FilePath, Encoding.UTF8.GetBytes(json));
 
         if (preserveRecoverySources)
         {

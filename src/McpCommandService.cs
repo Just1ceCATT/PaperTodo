@@ -51,6 +51,8 @@ internal sealed partial class McpCommandService
                 "collapse_paper" => PresentPaper(parameters, PaperPresentationAction.Collapse),
                 "toggle_paper_collapsed" => PresentPaper(parameters, PaperPresentationAction.ToggleCollapsed),
                 "activate_paper" => PresentPaper(parameters, PaperPresentationAction.Activate),
+                "reload_data" => ReloadData(),
+                "get_data_reload_status" => _commands.GetDataReloadStatus(),
                 "list_papers" => ListPapers(parameters),
                 "get_paper" => GetPaper(parameters),
                 "create_todo_paper" => CreateTodoPaper(parameters),
@@ -96,6 +98,12 @@ internal sealed partial class McpCommandService
             throw new McpApiException("invalid_params", "value is required.");
         var result = _controller.PublicSettings.Set(id, value);
         return result with { Setting = SettingsAccess(result.Setting) };
+    }
+
+    private DataReloadResult ReloadData()
+    {
+        RequireFullWrites();
+        return _commands.ReloadData(PaperOperationContext.Mcp());
     }
 
     private object ListPapers(JsonElement parameters)

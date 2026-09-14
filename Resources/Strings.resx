@@ -1246,21 +1246,51 @@
   <data name="ShortcutExit" xml:space="preserve">
     <value>退出</value>
   </data>
-  <data name="LabsMcp" xml:space="preserve"><value>MCP 本地接口</value></data>
-  <data name="LabsMcpEnable" xml:space="preserve"><value>启用 MCP（读取默认允许）</value></data>
-  <data name="TipLabsMcpEnable" xml:space="preserve"><value>允许本机 AI 客户端通过同一个 PaperTodo.exe 的 --mcp 模式读取纸片。关闭后命名管道立即停止。</value></data>
-  <data name="LabsMcpBlankWrites" xml:space="preserve"><value>允许空白与追加写入</value></data>
-  <data name="TipLabsMcpBlankWrites" xml:space="preserve"><value>允许新建纸片、向已有待办纸添加新待办、填写空白内容以及追加笔记；不会覆盖已有文字。</value></data>
-  <data name="LabsMcpFullWrites" xml:space="preserve"><value>允许完整写入</value></data>
-  <data name="TipLabsMcpFullWrites" xml:space="preserve"><value>允许修改已有待办文字、替换笔记、修改完成状态和提醒；同时包含空白与追加写入权限。</value></data>
-  <data name="LabsMcpDeletes" xml:space="preserve"><value>允许 MCP 直接删除</value></data>
-  <data name="TipLabsMcpDeletes" xml:space="preserve"><value>开启即预授权 AI 直接删除纸片或待办，不再逐次弹窗确认；操作无法自动撤销，请谨慎启用。</value></data>
-  <data name="LabsMcpStatusReady" xml:space="preserve"><value>本地 MCP 接口已就绪</value></data>
-  <data name="LabsMcpStatusDisabled" xml:space="preserve"><value>本地 MCP 接口已关闭</value></data>
-  <data name="LabsMcpCopyCodex" xml:space="preserve"><value>复制 Codex 配置</value></data>
-  <data name="LabsMcpCopyJson" xml:space="preserve"><value>复制 JSON 配置</value></data>
-  <data name="LabsMcpCopied" xml:space="preserve"><value>已复制</value></data>
-  <data name="LabsMcpCopyFailed" xml:space="preserve"><value>复制失败</value></data>
+  <data name="LabsMcp" xml:space="preserve">
+    <value>MCP 本地接口</value>
+  </data>
+  <data name="LabsMcpEnable" xml:space="preserve">
+    <value>启用 MCP（读取默认允许）</value>
+  </data>
+  <data name="TipLabsMcpEnable" xml:space="preserve">
+    <value>允许本机 AI 客户端通过同一个 PaperTodo.exe 的 --mcp 模式读取纸片。关闭后命名管道立即停止。</value>
+  </data>
+  <data name="LabsMcpBlankWrites" xml:space="preserve">
+    <value>允许空白与追加写入</value>
+  </data>
+  <data name="TipLabsMcpBlankWrites" xml:space="preserve">
+    <value>允许新建纸片、向已有待办纸添加新待办、填写空白内容以及追加笔记；不会覆盖已有文字。</value>
+  </data>
+  <data name="LabsMcpFullWrites" xml:space="preserve">
+    <value>允许完整写入</value>
+  </data>
+  <data name="TipLabsMcpFullWrites" xml:space="preserve">
+    <value>允许修改已有待办文字、替换笔记、修改完成状态和提醒；同时包含空白与追加写入权限。</value>
+  </data>
+  <data name="LabsMcpDeletes" xml:space="preserve">
+    <value>允许 MCP 直接删除</value>
+  </data>
+  <data name="TipLabsMcpDeletes" xml:space="preserve">
+    <value>开启即预授权 AI 直接删除纸片或待办，不再逐次弹窗确认；操作无法自动撤销，请谨慎启用。</value>
+  </data>
+  <data name="LabsMcpStatusReady" xml:space="preserve">
+    <value>本地 MCP 接口已就绪</value>
+  </data>
+  <data name="LabsMcpStatusDisabled" xml:space="preserve">
+    <value>本地 MCP 接口已关闭</value>
+  </data>
+  <data name="LabsMcpCopyCodex" xml:space="preserve">
+    <value>复制 Codex 配置</value>
+  </data>
+  <data name="LabsMcpCopyJson" xml:space="preserve">
+    <value>复制 JSON 配置</value>
+  </data>
+  <data name="LabsMcpCopied" xml:space="preserve">
+    <value>已复制</value>
+  </data>
+  <data name="LabsMcpCopyFailed" xml:space="preserve">
+    <value>复制失败</value>
+  </data>
   <data name="SettingsPlugins" xml:space="preserve">
     <value>插件</value>
   </data>
@@ -1405,16 +1435,19 @@
     <value>无法关联路径</value>
   </data>
   <data name="LinkedPathDropFailureMessage" xml:space="preserve">
-    <value>无法关联该文件或文件夹：&#xA;{0}</value>
+    <value>无法关联该文件或文件夹：
+{0}</value>
   </data>
   <data name="LinkedPathOpenFailureTitle" xml:space="preserve">
     <value>无法打开关联路径</value>
   </data>
   <data name="LinkedPathOpenFailureMessage" xml:space="preserve">
-    <value>无法调用系统打开该路径：&#xA;{0}</value>
+    <value>无法调用系统打开该路径：
+{0}</value>
   </data>
   <data name="LinkedPathMissingMessage" xml:space="preserve">
-    <value>关联的文件或文件夹已移动或删除：&#xA;{0}</value>
+    <value>关联的文件或文件夹已移动或删除：
+{0}</value>
   </data>
   <data name="SettingsShowLinkedPathExtensionOnly" xml:space="preserve">
     <value>不开长标题时仅显示文件扩展名</value>
@@ -1503,7 +1536,6 @@
   <data name="TipMicaAlwaysActive" xml:space="preserve">
     <value>勾选后，展开纸片和设置窗口失去焦点时仍保持激活时的材质外观。</value>
   </data>
-
   <data name="ColorSchemeNeutral" xml:space="preserve">
     <value>素灰</value>
   </data>
@@ -1540,7 +1572,7 @@
   <data name="SkinNativeUnsupported" xml:space="preserve">
     <value>原生背景需要 Windows 11 22H2 或更新版本。</value>
   </data>
-<data name="SettingsMatchAuxiliaryMaterial" xml:space="preserve">
+  <data name="SettingsMatchAuxiliaryMaterial" xml:space="preserve">
     <value>胶囊与菜单完整材质</value>
   </data>
   <data name="TipMatchAuxiliaryMaterial" xml:space="preserve">
@@ -1590,5 +1622,28 @@
   </data>
   <data name="TopBarExternalEditor" xml:space="preserve">
     <value>外部编辑</value>
+  </data>
+  <data name="DataReloadTitle" xml:space="preserve">
+    <value>PaperTodo 数据重载</value>
+  </data>
+  <data name="DataReloadConflict" xml:space="preserve">
+    <value>检测到 {0} 处外部修改冲突，冲突处已保留 PaperTodo 当前内容，其余无冲突修改已应用。
+
+完整外部文件：{1}
+冲突详情：{2}</value>
+  </data>
+  <data name="DataReloadFailed" xml:space="preserve">
+    <value>未能完成 data.json 重载：{0}
+
+外部文件不会被自动保存覆盖。请修正文件后保存，或通过 API / MCP 重试；界面刷新错误请重启后检查。</value>
+  </data>
+  <data name="DataReloadRestart" xml:space="preserve">
+    <value>数据已保存。界面语言的变更需要重启 PaperTodo 才能生效。</value>
+  </data>
+  <data name="DataReloadExitRecovery" xml:space="preserve">
+    <value>data.json 仍有未能应用的外部修改，原文件已保留。退出前的 PaperTodo 当前内容另存为：
+{0}
+
+重新打开后请检查两份文件，恢复需要保留的内容。</value>
   </data>
 </root>

@@ -66,6 +66,7 @@
 | D-055 | Aero 不采用 ACCENT_ENABLE_BLURBEHIND 原生模糊 | Rejected | 主题 / Window integration |
 | D-056 | 精确终帧与主胶囊纯视觉输入隔离 | Accepted | Edge handoff / input |
 | D-057 | DWM 桌面截图退出 CI 自动验收 | Accepted | 测试 / Window integration |
+| D-058 | data.json 三方合并与统一热重载入口 | Accepted | 持久化 / 外部 API |
 
 ## 维护规则
 
@@ -1403,10 +1404,6 @@ FD no-runtime 的 Windows SDK 定向压缩另做了 12 轮交错 A/B。`PaperTod
 
 ## D-038 — 活动就绪动画使用可撤销 render demand，Rendering 保留唯一推进权
 
-**Status:** Accepted
-
-### Context
-
 D-032 建立了 owner 分组屏障并移除直接补帧，但仅靠 activation/阻挡解除请求 WPF，未达到连续浏览的更新节奏目标。E-012 确认旧 watchdog 确实贡献过动画状态更新，不能因其来自 timer 就抹去收益；E-015 又把唤醒 UI、请求 WPF 和直接推进拆开，证明收益不必依赖第二个状态推进入口。E-016 在保留队列和 native 屏障的前提下，继续验证仅请求 WPF 的独立实现及正式整合产物。
 
 ### Decision
@@ -1438,6 +1435,9 @@ E-016 的同包对照及去除实验开关后的整合回放支持应用端 owne
 ---
 
 ## D-039 — 插件 API 采用向后兼容的 major.minor 演进
+---
+
+## D-058 — data.json 按身份合并，冲突保留运行状态并完整归档外部输入
 
 **Status:** Accepted
 
@@ -1796,3 +1796,20 @@ PR #319 的初版把主胶囊完整材质收展后的卡死解释为终点迟到
 - `.github/workflows/pull-request-build.yml`：仍执行材质行为检查，但不再输出桌面截图 artifact。
 - `tests/PaperTodo.MicaChecks/Program.cs` 与 `MaterialStudyChecks.cs`：保留确定性渲染与运行时检查；历史屏幕采样源文件删除。
 - `doc/experiments/pr227-drag-followup-20260922.md`：基线、故障证据与失败补绘实验。
+用户需要外部编辑 data.json 后立即作用于现有纸片，插件与 MCP 也需要可查询结果的显式入口。AppState 不是只读配置：自动保存、待提交编辑、窗口几何、插件绑定均会改变它。整份替换会使现有 PaperWindow 仍引用旧 PaperData；只监听 Changed 事件也不能阻止先到的自动保存覆盖外部输入。
+
+### Decision
+
+采用字段级三方比较，Paper / Todo 按 ID 对齐。不同字段自动合并，同字段不同值与删除/修改冲突保留 PaperTodo 一侧；同时归档原始外部字节及结构化差异，非冲突项继续应用。一份输入只发一个冲突提示，不增加版本选择器或插件安全沙箱。
+
+StateStore 是唯一持久化入口，重载与自动保存共用写锁/版本序号。正常文件写入保留可选 `$paperTodoRevision`，内存维护有界历史；匹配原始版本后再合并。当前最新快照不能冒充外部编辑器打开文件时的基线；版本未知/淘汰时按整份冲突保留，不能静默猜测。没有字段元数据的任意历史文件不能保证精确推断其编辑意图。
+
+自动监听、Native/Web Host API、MCP 共用同一实现。先收集内存编辑并完成持久化，再通过现有窗口/Runtime/Edge/事件路径更新。保留存活实体身份，释放当前调用者可能依赖的 session 延后至回调返回；状态 API 明确报告这一短暂的显示更新阶段。
+
+### Why / Consequences
+
+这避免三个入口产生不同合并规则，也不把 JSON 文件监听扩张成多端同步、文本协同或通用权限框架。历史快照有界，旧版本仍可完整追回但不承诺无限时间自动合并。保留输入与比较后替换解决受支持工作流中的保存竞争，不宣称与任意不配合的外部写入进程组成跨进程事务。无效主文件不触发运行时备份回退；不能完成正常退出保存时另存内存恢复文件，原外部文件不被覆盖。恢复副本参与图片 GC 保护。
+
+### Evidence
+
+`StateJsonMerge`、`StateStore.Reload`、`StateReloadModels`、`AppController.DataReload`、`PaperCommandService.DataReload` 及 `tests/PaperTodo.DataReloadChecks`。插件用法由 `plugin-samples/README.md` 维护。
