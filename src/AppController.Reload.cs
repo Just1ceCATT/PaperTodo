@@ -118,19 +118,19 @@ public sealed partial class AppController
         // 覆盖在 docked capsule 之上接管 input routing。不显式 dispose 会让旧
         // proxy 继续将 click 路由到已 closed 的 PaperWindow → 崩溃。
         DisposeEdgeCapsuleQueueCompositionProxies();
-        foreach (var existing in _windows.Values)
-        {
-            if (existing.IsLoaded && !existing.IsClosed)
-            {
-                existing.DetachFromDeepCapsuleStack();
-            }
-        }
+        // 每个 PaperWindow 的 docked _edgeCapsuleHost 由下面的 CloseForReal
+        // 同步销毁(BeginPaperWindowClose → CloseExpandedDeepCapsuleSlotHostForReal),
+        // 此处不再手动 detach 循环。
 
         var oldById = oldPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
         var newById = newPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
 
         // ---- Phase 4a: Remove(id 在 oldPapers 但不在 newPapers)----
         // 遍历 _windows 副本避免在迭代中修改字典。
+        // 用 CloseForReal 而非 Close:OnClosing 会拦截 Close 并改走 HidePaper
+        // (e.Cancel = true),导致旧 PaperWindow 留在字典里、旧 docked host 残留在
+        // 屏幕上;CloseForReal 通过 BeginPaperWindowClose 把 _windowLifecycle
+        // 置为 Closing,OnClosing 走"真正关闭"分支,真正销毁 HWND 并清掉 _windows 条目。
         foreach (var pair in _windows.ToArray())
         {
             if (newById.ContainsKey(pair.Key))
@@ -142,10 +142,13 @@ public sealed partial class AppController
             {
                 continue;
             }
-            window.Close();
+            window.CloseForReal();
         }
 
         // ---- Phase 4b: Replace(同 id 但 PaperDataFullyEquivalent == false)----
+        // 同上理由:必须用 CloseForReal 让旧 PaperWindow 真正销毁,否则 Phase 4c
+        // 的 GetOrCreatePaperWindow 会复用同一 entry(因为 IsClosed == false),
+        // 导致 _paper 字段绑定旧的 readonly PaperData + 旧 docked host 残留叠加。
         foreach (var pair in _windows.ToArray())
         {
             if (!oldById.TryGetValue(pair.Key, out var oldPaper))
@@ -165,13 +168,10 @@ public sealed partial class AppController
             {
                 continue; // Keep —— 不变,不重建
             }
-            window.Close();
-            // 不立刻 GetOrCreatePaperWindow,留给 Phase 4c 统一 Add,
-            // 这样 Closed 事件处理器先把 _windows.Remove 再 Add 回来,顺序干净。
-            // 但需要把 newPaper 临时标记为 "待添加",因 Close 已异步。
-            // 实际 Close() 在 WPF 是同步(只是事件异步通知),_windows 会在
-            // Closed 事件回调时移除条目;此处直接 GetOrCreate 即可,
-            // 因为 GetOrCreate 会处理 _windows 中存在的、Closed 的情况。
+            window.CloseForReal();
+            // CloseForReal 同步触发 Closed 事件,_windows 已被 lambda 移除;
+            // GetOrCreatePaperWindow 看到 _windows 无该 id,创建全新 PaperWindow
+            // 绑定 newPaper。
             GetOrCreatePaperWindow(newPaper, deferShellConstruction: false);
         }
 
