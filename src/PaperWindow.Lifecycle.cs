@@ -247,6 +247,9 @@ public sealed partial class PaperWindow
         WindowNative.ReleaseWindowSwitcherOwner(ref _windowSwitcherHiddenOwner);
         _windowSwitcherHiddenOwnerApplied = false;
         ReleaseHiddenNoteImages();
+        // 同步折叠 _edgeCapsuleHost(docked HWND)+ 清 _edgeCapsuleQueueCompositionProxyByWindow。
+        // Window.Close 不会自动调它,导致 reload 路径上旧 host 残留叠加。
+        DetachFromDeepCapsuleStack();
         DisposeCurrentPaperBody();
         _windowLifecycle = PaperWindowLifecycleState.Closed;
         _presentationState = PaperPresentationState.Closed;

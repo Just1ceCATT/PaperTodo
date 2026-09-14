@@ -110,6 +110,18 @@ public sealed partial class AppController
     /// </summary>
     private void ReloadWindows(IList<PaperData> oldPapers, IList<PaperData> newPapers)
     {
+        // 防御性全量清场:Reload 路径必须保证旧 docked HWND 与 master pill 在
+        // Diff/Close 前已彻底释放,避免与新窗口的视觉对象叠加;否则多次 reload
+        // 后旧 HWND 累积,造成重叠绘制甚至 UI 卡死/进程退出。
+        DestroyAllMasterCapsules();
+        foreach (var existing in _windows.Values)
+        {
+            if (existing.IsLoaded && !existing.IsClosed)
+            {
+                existing.DetachFromDeepCapsuleStack();
+            }
+        }
+
         var oldById = oldPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
         var newById = newPapers.ToDictionary(p => p.Id, StringComparer.Ordinal);
 
@@ -226,6 +238,9 @@ public sealed partial class AppController
     /// </summary>
     private void RelinquishOldStateReferences(AppState newState)
     {
+        // 防御性冗余:即使 Phase 4 ReloadWindows 漏清理也能兜底,防止 master pill 残留。
+        DestroyAllMasterCapsules();
+
         var newIds = new HashSet<string>(
             newState.Papers.Select(p => p.Id),
             StringComparer.Ordinal);
