@@ -114,6 +114,10 @@ public sealed partial class AppController
         // Diff/Close 前已彻底释放,避免与新窗口的视觉对象叠加;否则多次 reload
         // 后旧 HWND 累积,造成重叠绘制甚至 UI 卡死/进程退出。
         DestroyAllMasterCapsules();
+        // EdgeCapsuleQueueCompositionProxy(V3 Lite 队列合成代理)有独立 HWND,
+        // 覆盖在 docked capsule 之上接管 input routing。不显式 dispose 会让旧
+        // proxy 继续将 click 路由到已 closed 的 PaperWindow → 崩溃。
+        DisposeEdgeCapsuleQueueCompositionProxies();
         foreach (var existing in _windows.Values)
         {
             if (existing.IsLoaded && !existing.IsClosed)
@@ -240,6 +244,7 @@ public sealed partial class AppController
     {
         // 防御性冗余:即使 Phase 4 ReloadWindows 漏清理也能兜底,防止 master pill 残留。
         DestroyAllMasterCapsules();
+        DisposeEdgeCapsuleQueueCompositionProxies();
 
         var newIds = new HashSet<string>(
             newState.Papers.Select(p => p.Id),

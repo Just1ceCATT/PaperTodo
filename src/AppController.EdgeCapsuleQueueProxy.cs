@@ -767,7 +767,7 @@ public sealed partial class AppController
         }
     }
 
-    private void DisposeEdgeCapsuleQueueCompositionProxies()
+    internal void DisposeEdgeCapsuleQueueCompositionProxies()
     {
         var proxies =
             _edgeCapsuleQueueCompositionProxies.Values

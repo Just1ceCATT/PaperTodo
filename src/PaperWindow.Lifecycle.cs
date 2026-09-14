@@ -250,6 +250,10 @@ public sealed partial class PaperWindow
         // 同步折叠 _edgeCapsuleHost(docked HWND)+ 清 _edgeCapsuleQueueCompositionProxyByWindow。
         // Window.Close 不会自动调它,导致 reload 路径上旧 host 残留叠加。
         DetachFromDeepCapsuleStack();
+        // V3 Lite 队列合成代理(V3 EdgeCapsuleQueueCompositionProxy)是覆盖在
+        // docked capsule 之上的独立 HWND,接管 input routing;不 dispose 会让
+        // 旧 proxy 继续将 click 路由到本 closed PaperWindow → 崩溃。
+        _controller.CompleteEdgeCapsuleQueueCompositionProxyFor(this);
         DisposeCurrentPaperBody();
         _windowLifecycle = PaperWindowLifecycleState.Closed;
         _presentationState = PaperPresentationState.Closed;
