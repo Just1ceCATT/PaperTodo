@@ -35,6 +35,11 @@ public sealed partial class AppController : IDisposable
     public static AppController Current { get; private set; } = null!;
 
     private readonly StateStore _store = new();
+
+    /// <summary>
+    /// DataHotReloader 装配时需要 FilePath 等;暴露为 internal。
+    /// </summary>
+    internal StateStore Store => _store;
     private readonly NoteImageStore _imageStore = new();
     private readonly Dictionary<string, PaperWindow> _windows = new();
     private readonly DispatcherTimer _saveTimer;
@@ -2887,38 +2892,63 @@ public sealed partial class AppController : IDisposable
             var version = Interlocked.Increment(ref _saveVersion);
             NotifyPluginEventMutationStampChanged();
             attemptedVersion = version;
-            var stateRevision = Interlocked.Read(ref _stateRevision);
+
+            // R1.3 capture 时序:SerializeState 之后捕获 capturedRevision。
+            // 若 State 在 Serialize 与 Read 之间被 mutation 或 Reload 改变,
+            // 后续 SaveJsonIfRevisionAsync 的 _writeLock 内校验会失败,丢弃写盘。
             var json = _store.SerializeState(State);
+            var capturedRevision = Interlocked.Read(ref _stateRevision);
+
             if (sync)
             {
-                _store.SaveJsonSync(json, version);
-                if (!IsExiting) TryReleaseUnreferencedImageCache();
-                TryFlushPendingPluginPaperStateDeletes();
-                _hasShownSaveFailure = false;
+                // R4 同步路径:UI 线程双读校验。
+                // 校验失败(State 在 Serialize 之后又被 mutation 或 Reload 改变)→ 丢弃。
+                if (capturedRevision == Interlocked.Read(ref _stateRevision))
+                {
+                    _store.SaveJsonSync(json, version);
+                    if (!IsExiting) TryReleaseUnreferencedImageCache();
+                    TryFlushPendingPluginPaperStateDeletes();
+                    _hasShownSaveFailure = false;
+                }
             }
             else
             {
                 _ = Task.Run(async () =>
                 {
+                    bool saved = false;
                     try
                     {
-                        await _store.SaveJsonAsync(json, version);
-                        Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
-                        {
-                            if (version == Interlocked.Read(ref _saveVersion) &&
-                                stateRevision == Interlocked.Read(ref _stateRevision))
-                            {
-                                TryReleaseUnreferencedImageCache();
-                                TryFlushPendingPluginPaperStateDeletes();
-                            }
-                            _hasShownSaveFailure = false;
-                        }));
+                        // R4 异步路径:在 StateStore._writeLock 内部、写盘之前校验。
+                        saved = await _store.SaveJsonIfRevisionAsync(
+                            json,
+                            version,
+                            capturedRevision,
+                            () => Interlocked.Read(ref _stateRevision)).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
                         Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
                         {
                             HandleSaveFailure(ex, version);
+                        }));
+                        return;
+                    }
+
+                    if (saved)
+                    {
+                        Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+                        {
+                            // Late-arrival gate(原 2908–2909,保留):防止 post-commit
+                            // cleanup 误对新 save 执行。目的不同于 R4 校验:
+                            //   · R4 校验:防 stale write 覆盖磁盘(已由 SaveJsonIfRevisionAsync 内完成)
+                            //   · Late-arrival:防 cleanup 跑在更新的 save 之后
+                            if (version == Interlocked.Read(ref _saveVersion) &&
+                                capturedRevision == Interlocked.Read(ref _stateRevision))
+                            {
+                                if (!IsExiting) TryReleaseUnreferencedImageCache();
+                                TryFlushPendingPluginPaperStateDeletes();
+                            }
+                            _hasShownSaveFailure = false;
                         }));
                     }
                 });

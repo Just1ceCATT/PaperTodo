@@ -41,7 +41,7 @@ internal sealed class PaperBodyPluginEventHub : IDisposable
         IReadOnlyDictionary<string, TodoSnapshot> Todos,
         string? NoteContent);
 
-    private readonly record struct ChangeStamp(long StateRevision, long SaveVersion);
+    internal readonly record struct ChangeStamp(long StateRevision, long SaveVersion);
 
     private static readonly TimeSpan UserChangeDebounce = TimeSpan.FromMilliseconds(180);
 
@@ -137,6 +137,32 @@ internal sealed class PaperBodyPluginEventHub : IDisposable
         _baseline = CaptureState();
         _observedStamp = CaptureChangeStamp();
         _scheduledStamp = _observedStamp;
+    }
+
+    /// <summary>
+    /// R4:热重载完成后由 <see cref="AppController.TryReloadState"/> 的 Phase 5 调用。
+    /// 与 <see cref="ResetBaseline"/> 的区别:本方法 stamps 由调用方(Reload 协调器)
+    /// 直接指定,确保与 Reload Commit 后的 <c>(_stateRevision, _saveVersion)</c>
+    /// 完全对齐(<see cref="ResetBaseline"/> 用 <see cref="CaptureChangeStamp"/> 间接读取)。
+    ///
+    /// 同时清零 <see cref="_suppressionDepth"/> 并停掉 <see cref="_flushTimer"/>,
+    /// 避免 SuppressScans 的 IDisposable 持有跨 Reload 边界产生 stale 状态。
+    /// </summary>
+    internal void FullReloadReset(ChangeStamp newStamp)
+    {
+        _dispatcher.VerifyAccess();
+        _flushTimer.Stop();
+        if (_subscriptions.Count == 0)
+        {
+            _baseline.Clear();
+        }
+        else
+        {
+            _baseline = CaptureState();
+        }
+        _observedStamp = newStamp;
+        _scheduledStamp = newStamp;
+        _suppressionDepth = 0;
     }
 
     public void RemoveSession(Guid sessionId)

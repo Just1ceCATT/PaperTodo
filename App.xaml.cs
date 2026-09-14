@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 using Application = System.Windows.Application;
 
 namespace PaperTodo;
@@ -133,6 +134,17 @@ public partial class App : Application
         }
         _controller.StartStateBackupPolicy();
         CompleteSingleInstanceStartup();
+
+        // R1+R3+R4:装配 DataHotReloader,监听 data.json 变更并触发热重载。
+        // 启动 2 秒内的文件变更视为启动期副作用,被 _startupGraceUntil 抑制。
+        if (_controller != null)
+        {
+            _controller.AttachedHotReloader = new DataHotReloader(
+                _controller.Store,
+                _controller,
+                DateTime.UtcNow.AddSeconds(2));
+            _controller.AttachedHotReloader.Start();
+        }
     }
 
     private void HandleSingleInstanceCommand(IReadOnlyList<string> args)
@@ -171,6 +183,17 @@ public partial class App : Application
 
     private void DispatchSingleInstanceCommand(IReadOnlyList<string> args)
     {
+        // R2.3:单实例命令守卫。Reload 期间延迟重投,reload 完成后执行。
+        // 不抛异常:异常会通过 IPC 传到第二进程导致其崩溃。
+        // 无死循环:Reload 本身不投递单实例命令。
+        if (_controller?.IsReloading == true)
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => DispatchSingleInstanceCommand(args),
+                DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
         try
         {
             Dispatcher.Invoke(() => ExecuteSingleInstanceCommand(args));
@@ -368,6 +391,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _singleInstance?.Dispose();
+        // DataHotReloader 引用 _controller,需在 _controller.Dispose 之前 Dispose
+        // 以避免 watcher 回调在 controller 已 Dispose 后访问 State。
+        _controller?.AttachedHotReloader?.Dispose();
         _controller?.Dispose();
         base.OnExit(e);
     }

@@ -272,6 +272,82 @@ public sealed class StateStore
         }
     }
 
+    /// <summary>
+    /// R4: Generation Validation。在 <see cref="_writeLock"/> 内部、写盘<strong>之前</strong>
+    /// 校验 <paramref name="capturedRevision"/> 是否仍等于当前 revision。
+    /// 若不等则视为 stale,丢弃本次写入(不调用 WriteJsonInternal)。
+    /// 闭包抛错视为 stale —— 绝不旁路校验。
+    /// </summary>
+    public async Task<bool> SaveJsonIfRevisionAsync(
+        string json,
+        long version,
+        long capturedRevision,
+        Func<long> getCurrentRevision)
+    {
+        ArgumentNullException.ThrowIfNull(getCurrentRevision);
+
+        await _writeLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // Generation Validation (R1.3 / R4.3):
+            // capturedRevision 必须仍等于当前 revision。若不等,State 已被
+            // mutation(MarkDirty)或重载(ReloadState)改变,丢弃本次写入。
+            long current;
+            try
+            {
+                current = getCurrentRevision();
+            }
+            catch
+            {
+                // 闭包抛错视为 stale —— 绝不旁路校验。
+                return false;
+            }
+
+            if (current != capturedRevision)
+            {
+                return false;
+            }
+
+            // 物理并发保护(已有):基于 _saveVersion 防回写。
+            if (version < _latestWrittenVersion)
+            {
+                return false;
+            }
+
+            await Task.Run(() => WriteJsonInternal(json)).ConfigureAwait(false);
+            _latestWrittenVersion = version;
+            return true;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 将原始字节反序列化为已 Normalize 的 <see cref="AppState"/>。
+    /// 复用 <see cref="JsonOptions"/> 与 <see cref="NormalizeAfterLoad"/>,
+    /// 与 <see cref="Load"/> 行为对齐。
+    /// </summary>
+    internal AppState? DeserializeAppState(byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        try
+        {
+            var state = JsonSerializer.Deserialize<AppState>(bytes, JsonOptions);
+            if (state == null)
+            {
+                return null;
+            }
+            NormalizeAfterLoad(state);
+            return state;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public bool TryRefreshBackupFromPrimary()
     {
         _writeLock.Wait();
@@ -320,7 +396,7 @@ public sealed class StateStore
         }
     }
 
-    private static bool TryReadValidatedStateBytes(string path, out byte[] bytes)
+    internal static bool TryReadValidatedStateBytes(string path, out byte[] bytes)
     {
         bytes = [];
         try

@@ -847,6 +847,11 @@ internal sealed partial class PaperCommandService
         {
             throw Error("app_exiting", "PaperTodo is exiting.");
         }
+        // R2.3:外部 mutation 入口守卫。Reload 期间排队但未执行的命令会被拒绝。
+        if (_controller.IsReloading)
+        {
+            throw Error("state_reloading", "PaperTodo is reloading state from data.json.");
+        }
     }
 
     private static string RequiredId(string? value, string name)

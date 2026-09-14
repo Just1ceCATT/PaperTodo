@@ -25,6 +25,12 @@ internal sealed class McpCommandService
         {
             throw new McpApiException("app_exiting", "PaperTodo is exiting.");
         }
+        // R2.3:外部 mutation 入口守卫。直接抛 McpApiException 而非 PaperCommandException,
+        // 因为 Execute 末尾的 catch (PaperCommandException) 会重包,丢失 error code。
+        if (_controller.IsReloading)
+        {
+            throw new McpApiException("state_reloading", "PaperTodo is reloading state from data.json.");
+        }
         if (!_controller.State.McpEnabled)
         {
             throw new McpApiException(
