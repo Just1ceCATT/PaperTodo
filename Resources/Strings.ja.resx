@@ -1646,4 +1646,31 @@ papertodo と PaperTodo_Bold（.ttf/.otf）の両方を置いてください。<
 
 再起動後に両方のファイルを確認し、必要な内容を復元してください。</value>
   </data>
+  <data name="DataReloadConflictTitle" xml:space="preserve">
+    <value>PaperTodo データの競合</value>
+  </data>
+  <data name="DataReloadConflictPath" xml:space="preserve">
+    <value>パス:{0}</value>
+  </data>
+  <data name="DataReloadConflictMemoryHeader" xml:space="preserve">
+    <value>現在 (PaperTodo)</value>
+  </data>
+  <data name="DataReloadConflictExternalHeader" xml:space="preserve">
+    <value>外部ファイル</value>
+  </data>
+  <data name="DataReloadConflictKeepMemory" xml:space="preserve">
+    <value>現在を保持</value>
+  </data>
+  <data name="DataReloadConflictKeepExternal" xml:space="preserve">
+    <value>外部を採用</value>
+  </data>
+  <data name="DataReloadConflictValueMissing" xml:space="preserve">
+    <value>(なし)</value>
+  </data>
+  <data name="DataReloadConflictMemoryOnlyTooltip" xml:space="preserve">
+    <value>PaperTodo には存在するが外部ファイルにない行です。「現在を保持」で採用、「外部を採用」で破棄されます。</value>
+  </data>
+  <data name="DataReloadConflictExternalOnlyTooltip" xml:space="preserve">
+    <value>外部ファイルには存在するが PaperTodo にない行です。「外部を採用」で採用、「現在を保持」で破棄されます。</value>
+  </data>
 </root>

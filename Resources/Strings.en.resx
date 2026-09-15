@@ -1646,4 +1646,31 @@ Autosave will not overwrite pending external edits. Correct and save the file, o
 
 Check both files after restarting to recover the content you need.</value>
   </data>
+  <data name="DataReloadConflictTitle" xml:space="preserve">
+    <value>PaperTodo data conflict</value>
+  </data>
+  <data name="DataReloadConflictPath" xml:space="preserve">
+    <value>Path: {0}</value>
+  </data>
+  <data name="DataReloadConflictMemoryHeader" xml:space="preserve">
+    <value>Current (PaperTodo)</value>
+  </data>
+  <data name="DataReloadConflictExternalHeader" xml:space="preserve">
+    <value>External (incoming file)</value>
+  </data>
+  <data name="DataReloadConflictKeepMemory" xml:space="preserve">
+    <value>Keep current</value>
+  </data>
+  <data name="DataReloadConflictKeepExternal" xml:space="preserve">
+    <value>Keep external</value>
+  </data>
+  <data name="DataReloadConflictValueMissing" xml:space="preserve">
+    <value>(missing)</value>
+  </data>
+  <data name="DataReloadConflictMemoryOnlyTooltip" xml:space="preserve">
+    <value>Present in PaperTodo but not in the external file. Kept by "Keep current"; discarded by "Keep external".</value>
+  </data>
+  <data name="DataReloadConflictExternalOnlyTooltip" xml:space="preserve">
+    <value>Present in the external file but not in PaperTodo. Adopted by "Keep external"; discarded by "Keep current".</value>
+  </data>
 </root>

@@ -11,7 +11,7 @@ internal sealed class ExternalStatePendingException : InvalidOperationException
     public ExternalStatePendingException() : base("data.json has an unconsumed external change.") { }
 }
 
-internal sealed record StateReloadCommit(AppState? State, DataReloadResult Result);
+internal sealed record StateReloadCommit(AppState? State, DataReloadResult Result, IReadOnlyList<StateMergeConflict>? Conflicts);
 
 public sealed partial class StateStore
 {
@@ -154,13 +154,13 @@ public sealed partial class StateStore
         try
         {
             if (!_reloadTracking || version < _latestWrittenVersion)
-                return new(null, new() { Outcome = "busy", Revision = _reloadRevision });
+                return new(null, new() { Outcome = "busy", Revision = _reloadRevision }, null);
 
             var bytes = ReadPrimaryBytes();
             if (bytes == null)
-                return new(null, new() { Outcome = "invalid", Error = "data.json is missing; the running state was not replaced." });
+                return new(null, new() { Outcome = "invalid", Error = "data.json is missing; the running state was not replaced." }, null);
             if (_reloadAcceptedBytes != null && bytes.AsSpan().SequenceEqual(_reloadAcceptedBytes))
-                return new(null, new() { Revision = _reloadRevision });
+                return new(null, new() { Revision = _reloadRevision }, null);
 
             var text = DecodeStateBytes(bytes);
             var document = ParseObject(text);
@@ -199,21 +199,21 @@ public sealed partial class StateStore
                 ConflictDiffFile = diffFile,
                 Revision = _reloadRevision,
                 RestartRequired = !string.Equals(memory.UiLanguage, candidate.UiLanguage, StringComparison.Ordinal)
-            });
+            }, conflictCount > 0 ? merge.Conflicts : null);
         }
         catch (ExternalStatePendingException)
         {
             return new(null, new() { Outcome = "busy", Error = "data.json changed again during reload; retry with the latest file.",
-                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile });
+                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null);
         }
         catch (Exception ex) when (ex is JsonException or DecoderFallbackException or ArgumentException)
         {
-            return new(null, new() { Outcome = "invalid", Error = ex.Message });
+            return new(null, new() { Outcome = "invalid", Error = ex.Message }, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             return new(null, new() { Outcome = "failed", Error = ex.Message,
-                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile });
+                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null);
         }
         finally { _writeLock.Release(); }
     }

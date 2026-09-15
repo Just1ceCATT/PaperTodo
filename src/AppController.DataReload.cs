@@ -2,6 +2,7 @@ using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using PaperTodo.Plugin;
 using Application = System.Windows.Application;
@@ -11,7 +12,8 @@ namespace PaperTodo;
 public sealed partial class AppController
 {
     private sealed record PendingDataReload(AppState Before, AppState Next,
-        DataReloadResult Result, PaperOperationContext Origin);
+        DataReloadResult Result, PaperOperationContext Origin,
+        IReadOnlyList<StateMergeConflict>? Conflicts);
 
     private FileSystemWatcher? _dataWatcher;
     private DispatcherTimer? _dataReloadTimer;
@@ -138,7 +140,7 @@ public sealed partial class AppController
             _saveTimer.Stop();
             _forceSaveTimer.Stop();
             _hasPendingDirty = false;
-            _pendingDataReload = new(before, commit.State, commit.Result, origin);
+            _pendingDataReload = new(before, commit.State, commit.Result, origin, commit.Conflicts);
             // A plugin can delete its own paper through this call. Return to the caller before
             // tearing down that session/runtime. Send precedes the next input/render/timer turn;
             // shared commands and saves remain gated until the committed model is reconciled.
@@ -188,7 +190,10 @@ public sealed partial class AppController
                     pair.Value.PrepareForCapsulePresentationModeChange();
             }
 
-            StateReloadModels.Apply(State, pending.Next);
+            // ====== 冲突时弹窗让用户决策(逐个冲突单选) ======
+            var effectiveNext = ResolveConflictsInteractively(pending);
+
+            StateReloadModels.Apply(State, effectiveNext);
             foreach (var paper in State.Papers)
             {
                 if (_windows.TryGetValue(paper.Id, out var window) && oldPapers.TryGetValue(paper.Id, out var old))
@@ -332,6 +337,39 @@ public sealed partial class AppController
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// 当 pending.Conflicts 非空时,逐一弹窗让用户选保留当前/保留传入。
+    /// 返回应用了用户决策后的 effectiveNext。
+    /// </summary>
+    private AppState ResolveConflictsInteractively(PendingDataReload pending)
+    {
+        var conflicts = pending.Conflicts;
+        if (conflicts == null || conflicts.Count == 0) return pending.Next;
+
+        var owner = SelectDialogOwner();
+        var choices = new Dictionary<string, ConflictChoice>(StringComparer.Ordinal);
+        foreach (var conflict in conflicts)
+        {
+            var choice = DataReloadConflictDialog.Show(owner, conflict);
+            // 用户关闭/X/Esc → Show 返回 KeepMemory;选择 KeepExternal 才覆盖
+            if (choice == ConflictChoice.KeepExternal)
+            {
+                choices[conflict.Path] = choice;
+            }
+        }
+        if (choices.Count == 0) return pending.Next;
+        return JsonPath.ApplyChoices(pending.Next, conflicts, choices);
+    }
+
+    private Window? SelectDialogOwner()
+    {
+        foreach (var w in _windows.Values)
+        {
+            if (w.IsVisible && PresentationSource.FromVisual(w) is HwndSource) return w;
+        }
+        return null;
     }
 
     private bool SaveForNormalShutdown()
