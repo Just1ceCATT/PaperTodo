@@ -47,10 +47,10 @@ internal sealed class DataReloadConflictDialogWindow : Window
     public DataReloadConflictDialogWindow(StateMergeConflict conflict)
     {
         Title = Strings.Get("DataReloadConflictTitle");
-        Width = 720;
-        Height = 560;
-        MinWidth = 520;
-        MinHeight = 360;
+        Width = 800;
+        Height = 600;
+        MinWidth = 560;
+        MinHeight = 380;
         SizeToContent = SizeToContent.Manual;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.CanResize;
@@ -171,21 +171,26 @@ internal sealed class DataReloadConflictDialogWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
+        // 中间:两个并排的 diff 视图,共享一个 ScrollSyncGroup 实现两侧同步滚动
+        var sync = new ScrollSyncGroup();
+
         var memoryPanel = BuildDiffPanel(
             Strings.Get("DataReloadConflictMemoryHeader"),
             memoryText,
             externalText,
-            LineMark.OnlyInMemory);
-        Grid.SetColumn(memoryPanel, 0);
-        grid.Children.Add(memoryPanel);
+            LineMark.OnlyInMemory,
+            sync);
+        Grid.SetColumn(memoryPanel.root, 0);
+        grid.Children.Add(memoryPanel.root);
 
         var externalPanel = BuildDiffPanel(
             Strings.Get("DataReloadConflictExternalHeader"),
             externalText,
             memoryText,
-            LineMark.OnlyInExternal);
-        Grid.SetColumn(externalPanel, 2);
-        grid.Children.Add(externalPanel);
+            LineMark.OnlyInExternal,
+            sync);
+        Grid.SetColumn(externalPanel.root, 2);
+        grid.Children.Add(externalPanel.root);
 
         content.Children.Add(grid);
 
@@ -197,27 +202,42 @@ internal sealed class DataReloadConflictDialogWindow : Window
     /// 构造一个可滚动的 diff 面板:头部 + ScrollViewer + StackPanel of colored TextBlocks。
     /// thisSideText 是本面板显示的内容,otherSideText 是对面面板的内容(用于 diff)。
     /// thisSideMark 指定"只在本侧出现的行"标记。
+    /// <summary>
+    /// 构造一个可滚动的 diff 面板:头部 + ScrollViewer + 行集合。
+    /// 返回的 ScrollViewer 由 ScrollSyncGroup 协调两侧同步滚动。
     /// </summary>
-    private static UIElement BuildDiffPanel(string header, string thisSideText, string otherSideText, LineMark thisSideMark)
+    private static (Border root, ScrollViewer scrollViewer) BuildDiffPanel(
+        string header,
+        string thisSideText,
+        string otherSideText,
+        LineMark thisSideMark,
+        ScrollSyncGroup sync)
     {
-        var stack = new StackPanel();
-        var headerText = new TextBlock
+        // 头部(header) + 内容(scrollViewer),整体套一个 Border 作为面板外壳
+        var stack = new DockPanel { LastChildFill = true };
+
+        var headerBorder = new Border
         {
-            Text = header,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Theme.TextBrush,
-            Margin = new Thickness(0, 0, 0, 4)
+            Background = new SolidColorBrush(Color.FromRgb(0xEE, 0xEE, 0xEE)), // 浅灰头
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x42, 0x42, 0x42)), // 明显深色边框
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Padding = new Thickness(8, 6, 8, 6),
+            Child = new TextBlock
+            {
+                Text = header,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Theme.TextBrush,
+                FontSize = AppTypography.Scale(12)
+            }
         };
-        stack.Children.Add(headerText);
+        DockPanel.SetDock(headerBorder, Dock.Top);
+        stack.Children.Add(headerBorder);
 
         // 用 LineDiff 计算逐行差异
         var diff = LineDiff.DiffLines(otherSideText, thisSideText);
 
         // 高亮策略:左侧 4px 色条 + 微妙底色 + 加粗 + 彩色前缀,而不是整行深色背景,
         // 保证文本在浅底色上仍清晰可读。
-        // - 当前独有(OnlyInMemory,选 KeepExternal 会丢失):左侧红色条 + "+ 红" 字 + 极浅粉底
-        // - 外部独有(OnlyInExternal,选 KeepMemory 会丢失):左侧绿色条 + "+ 绿" 字 + 极浅绿底
-        // - 共有行:透明背景 + 普通字重
         var stripeBrush = thisSideMark switch
         {
             LineMark.OnlyInMemory => new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35)),  // Material Red 600
@@ -274,7 +294,6 @@ internal sealed class DataReloadConflictDialogWindow : Window
                     Text = fullText,
                     FontFamily = new FontFamily("Consolas, Courier New, monospace"),
                     FontSize = AppTypography.Scale(11.5),
-                    // 高亮行用深色前景 + 浅背景,提升对比度;普通行用默认前景。
                     Foreground = isThisSideOnly ? markerBrush : Theme.TextBrush,
                     Background = isThisSideOnly ? subtleBg : Brushes.Transparent,
                     Padding = new Thickness(6, 2, 6, 2),
@@ -298,17 +317,64 @@ internal sealed class DataReloadConflictDialogWindow : Window
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             MaxHeight = 360,
-            MinHeight = 120,
+            MinHeight = 160,
             VerticalContentAlignment = VerticalAlignment.Top,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             Content = linesPanel,
             Background = Theme.PaperBrush,
-            BorderBrush = Theme.PaperBorderBrush,
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(2)
+            BorderThickness = new Thickness(0)
         };
+        sync.Register(scrollViewer);
         stack.Children.Add(scrollViewer);
-        return stack;
+
+        var panelBorder = new Border
+        {
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x42, 0x42, 0x42)), // 明显深色边框(VS Code style)
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(4),
+            Child = stack
+        };
+        return (panelBorder, scrollViewer);
+    }
+
+    /// <summary>
+    /// 把一组 ScrollViewer 的滚动位置互相绑定:任一滚动都同步到其它。
+    /// 类似 VS Code conflict editor 的双栏同步行为。
+    /// </summary>
+    private sealed class ScrollSyncGroup
+    {
+        private readonly List<ScrollViewer> _members = new();
+        private bool _syncing;
+
+        public void Register(ScrollViewer sv)
+        {
+            _members.Add(sv);
+            sv.ScrollChanged += OnScrollChanged;
+        }
+
+        private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            if (_syncing) return;
+            // 仅在用户实际滚动(VerticalChange 或 HorizontalChange 非零)时同步
+            if (e.VerticalChange == 0 && e.HorizontalChange == 0) return;
+            var src = (ScrollViewer)sender;
+            _syncing = true;
+            try
+            {
+                foreach (var sv in _members)
+                {
+                    if (sv == src) continue;
+                    if (e.VerticalChange != 0)
+                        sv.ScrollToVerticalOffset(Math.Min(src.VerticalOffset, sv.ScrollableHeight));
+                    if (e.HorizontalChange != 0)
+                        sv.ScrollToHorizontalOffset(Math.Min(src.HorizontalOffset, sv.ScrollableWidth));
+                }
+            }
+            finally
+            {
+                _syncing = false;
+            }
+        }
     }
 
     /// <summary>
