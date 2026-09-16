@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,9 +40,6 @@ internal static class DataReloadConflictDialog
 
 internal sealed class DataReloadConflictDialogWindow : Window
 {
-    /// <summary>冲突行可视化标记。</summary>
-    private enum LineMark { Common, OnlyInMemory, OnlyInExternal }
-
     public DataReloadConflictDialogWindow(StateMergeConflict conflict)
     {
         Title = Strings.Get("DataReloadConflictTitle");
@@ -161,33 +157,31 @@ internal sealed class DataReloadConflictDialogWindow : Window
         DockPanel.SetDock(buttonRow, Dock.Bottom);
         content.Children.Add(buttonRow);
 
-        // 中间:两个并排的 diff 视图
-        var memoryText = FormatConflictValue(conflict.PaperTodoExists, conflict.PaperTodo);
-        var externalText = FormatConflictValue(conflict.ExternalExists, conflict.External);
+        // 中间:两个并排的 diff 视图,共享 ScrollSyncGroup 实现双栏同步滚动
+        var memoryText = DataReloadConflictUi.FormatConflictValue(conflict.PaperTodoExists, conflict.PaperTodo);
+        var externalText = DataReloadConflictUi.FormatConflictValue(conflict.ExternalExists, conflict.External);
 
-        // 如果双侧是相同文本(common all),退化为单边 + 提示,不浪费屏幕
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        // 中间:两个并排的 diff 视图,共享一个 ScrollSyncGroup 实现两侧同步滚动
-        var sync = new ScrollSyncGroup();
+        var sync = new DataReloadConflictUi.ScrollSyncGroup();
 
-        var memoryPanel = BuildDiffPanel(
+        var memoryPanel = DataReloadConflictUi.BuildDiffPanel(
             Strings.Get("DataReloadConflictMemoryHeader"),
             memoryText,
             externalText,
-            LineMark.OnlyInMemory,
+            DataReloadConflictUi.LineMark.OnlyInMemory,
             sync);
         Grid.SetColumn(memoryPanel.root, 0);
         grid.Children.Add(memoryPanel.root);
 
-        var externalPanel = BuildDiffPanel(
+        var externalPanel = DataReloadConflictUi.BuildDiffPanel(
             Strings.Get("DataReloadConflictExternalHeader"),
             externalText,
             memoryText,
-            LineMark.OnlyInExternal,
+            DataReloadConflictUi.LineMark.OnlyInExternal,
             sync);
         Grid.SetColumn(externalPanel.root, 2);
         grid.Children.Add(externalPanel.root);
@@ -197,16 +191,22 @@ internal sealed class DataReloadConflictDialogWindow : Window
         root.Child = content;
         Content = root;
     }
+}
 
-    /// <summary>
-    /// 构造一个可滚动的 diff 面板:头部 + ScrollViewer + StackPanel of colored TextBlocks。
-    /// thisSideText 是本面板显示的内容,otherSideText 是对面面板的内容(用于 diff)。
-    /// thisSideMark 指定"只在本侧出现的行"标记。
+/// <summary>
+/// data.json 冲突弹窗共用的 UI 原语(单/双栏 diff 面板、行级同步滚动、JsonNode 文本化)。
+/// DataReloadConflictDialog 与 DataReloadPaperConflictDialog 都从这里取构件。
+/// </summary>
+internal static class DataReloadConflictUi
+{
+    /// <summary>冲突行可视化标记。</summary>
+    public enum LineMark { Common, OnlyInMemory, OnlyInExternal }
+
     /// <summary>
     /// 构造一个可滚动的 diff 面板:头部 + ScrollViewer + 行集合。
     /// 返回的 ScrollViewer 由 ScrollSyncGroup 协调两侧同步滚动。
     /// </summary>
-    private static (Border root, ScrollViewer scrollViewer) BuildDiffPanel(
+    public static (Border root, ScrollViewer scrollViewer) BuildDiffPanel(
         string header,
         string thisSideText,
         string otherSideText,
@@ -341,7 +341,7 @@ internal sealed class DataReloadConflictDialogWindow : Window
     /// 把一组 ScrollViewer 的滚动位置互相绑定:任一滚动都同步到其它。
     /// 类似 VS Code conflict editor 的双栏同步行为。
     /// </summary>
-    private sealed class ScrollSyncGroup
+    public sealed class ScrollSyncGroup
     {
         private readonly List<ScrollViewer> _members = new();
         private bool _syncing;
@@ -385,7 +385,7 @@ internal sealed class DataReloadConflictDialogWindow : Window
     /// - JsonArray → 一行一项
     /// - null/missing → "(空)" / "(缺失)"
     /// </summary>
-    private static string FormatConflictValue(bool exists, JsonNode? node)
+    public static string FormatConflictValue(bool exists, JsonNode? node)
     {
         if (!exists) return Strings.Get("DataReloadConflictValueMissing");
         if (node == null) return "(null)";
