@@ -217,12 +217,18 @@ internal static partial class Program
                 Require(diffFile != null, "paper conflict did not write dataconflictdiff");
                 var diff = J(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, diffFile!)));
                 Require(diff["conflicts"]!.AsArray().All(c => Str(c!["path"]!).StartsWith($"papers[id={freshPaperId}]")), $"leaf paths in diff must remain under papers[id={freshPaperId}]");
+                // 选 KeepExternal 后,disk 上的 data.json 必须同步反映用户决策(避免 1-10s
+                // autosave 延迟期间用户以为"保留传入没生效")。
+                var diskAfter = ReadLive();
+                var diskFresh = diskAfter["papers"]!.AsArray().Single(p => Str(p!["id"]) == freshPaperId);
+                Require(Str(diskFresh["content"]) == "external body", $"disk Content should be 'external body' after KeepExternal, got '{Str(diskFresh["content"])}'");
+                Require(Str(diskFresh["title"]) == "EXT", $"disk Title should be 'EXT' after KeepExternal, got '{Str(diskFresh["title"])}'");
             }
             finally
             {
                 AppController.ConflictDialogDriver = previousDriver;
             }
-            Console.WriteLine("PASS live paper-level conflict aggregation, identity, diff unchanged, KeepExternal applied");
+            Console.WriteLine("PASS live paper-level conflict aggregation, identity, diff unchanged, KeepExternal applied, disk synced");
 
             controller.SaveNow(sync: true);
             var deletion = ReadLive(); deletion["papers"]!.AsArray().Remove(LivePaper(deletion, "note-a")); WriteLive(deletion);

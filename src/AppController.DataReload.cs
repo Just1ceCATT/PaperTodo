@@ -243,9 +243,16 @@ public sealed partial class AppController
         RefreshTrayMenu();
         PublishExternalPaperOperation(pending.Origin);
         QueueDataReloadNotice(_lastDataReloadResult ?? pending.Result);
-        // Existing UI rules may normalize a placeholder or geometry. Save those actual runtime
-        // adjustments through the normal versioned writer, not a second persistence path.
-        if (!StateReloadModels.Equivalent(State, pending.Next)) MarkDirty();
+        // 冲突对话框的 KeepExternal 会把 pending.Next.papers[X] 替换为 externalJson.papers[X],
+        // 磁盘上 WriteTrackedJson 写的是 candidate(默认 Resolution=paperTodo),必须立即同步
+        // 写盘才能让用户选 KeepExternal 后磁盘也是 external 版本。否则 1-10 秒 autosave 延迟
+        // 期间,用户查看磁盘会发现"保留传入没生效"。
+        // 仅有运行时微调(占位符归一化、几何调整)且无用户决策变化时,才走 MarkDirty autosave。
+        if (!StateReloadModels.Equivalent(State, pending.Next))
+        {
+            if (pending.Conflicts != null && pending.Conflicts.Count > 0) SaveNow(sync: true);
+            else MarkDirty();
+        }
     }
 
     private void RefreshReloadedSettings(AppState before)
