@@ -35,6 +35,51 @@ internal static class JsonPath
         return JsonSerializer.Deserialize<AppState>(json.ToJsonString(StateStore.JsonOptions), StateStore.JsonOptions)!;
     }
 
+    /// <summary>
+    /// 按 paper ID 级选择整替换 paper。paperChoices[id] == KeepExternal → 从 externalJson.papers
+    /// 按 id 找节点,整节点覆盖 next.papers 中同 id 节点;KeepMemory / 不在字典里 → 保留 next。
+    /// 替换顺序按字典迭代顺序(Stable);先调用 ApplyChoices 处理 leaf path,再用本方法叠加 paper 级决策。
+    /// </summary>
+    public static AppState ApplyPaperChoices(
+        AppState next,
+        IReadOnlyDictionary<string, PaperConflictChoice> paperChoices,
+        JsonObject externalJson)
+    {
+        if (paperChoices.Count == 0) return next;
+
+        var json = JsonSerializer.SerializeToNode(next, StateStore.JsonOptions)!.AsObject();
+        var nextPapers = json["papers"] as JsonArray;
+        var externalPapers = externalJson["papers"] as JsonArray;
+        if (nextPapers == null || externalPapers == null) return next;
+
+        // 建立 externalPapers 按 id 索引,避免每条 paper 线性扫描
+        var externalById = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
+        foreach (var node in externalPapers)
+        {
+            if (node is JsonObject obj && obj["id"] is JsonValue idVal &&
+                idVal.TryGetValue<string>(out var id))
+            {
+                externalById[id] = obj;
+            }
+        }
+
+        // 按 id 替换 nextPapers 数组中的对应节点;不在 choices 里或 KeepMemory 的不动
+        for (var i = 0; i < nextPapers.Count; i++)
+        {
+            if (nextPapers[i] is not JsonObject target) continue;
+            if (target["id"] is not JsonValue targetIdVal ||
+                !targetIdVal.TryGetValue<string>(out var targetId)) continue;
+            if (!paperChoices.TryGetValue(targetId, out var choice)) continue;
+            if (choice != PaperConflictChoice.KeepExternal) continue;
+            if (!externalById.TryGetValue(targetId, out var externalNode)) continue;
+
+            // 整 paper 替换,DeepClone 一份避免后续引用污染 externalJson
+            nextPapers[i] = (JsonNode?)externalNode.DeepClone();
+        }
+
+        return JsonSerializer.Deserialize<AppState>(json.ToJsonString(StateStore.JsonOptions), StateStore.JsonOptions)!;
+    }
+
     private static void ApplyExternalToPath(JsonObject root, string path, JsonNode? externalNode)
     {
         if (externalNode == null) return;

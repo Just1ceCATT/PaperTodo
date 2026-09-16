@@ -11,7 +11,7 @@ internal sealed class ExternalStatePendingException : InvalidOperationException
     public ExternalStatePendingException() : base("data.json has an unconsumed external change.") { }
 }
 
-internal sealed record StateReloadCommit(AppState? State, DataReloadResult Result, IReadOnlyList<StateMergeConflict>? Conflicts);
+internal sealed record StateReloadCommit(AppState? State, DataReloadResult Result, IReadOnlyList<StateMergeConflict>? Conflicts, JsonObject? ExternalJson);
 
 public sealed partial class StateStore
 {
@@ -154,13 +154,13 @@ public sealed partial class StateStore
         try
         {
             if (!_reloadTracking || version < _latestWrittenVersion)
-                return new(null, new() { Outcome = "busy", Revision = _reloadRevision }, null);
+                return new(null, new() { Outcome = "busy", Revision = _reloadRevision }, null, null);
 
             var bytes = ReadPrimaryBytes();
             if (bytes == null)
-                return new(null, new() { Outcome = "invalid", Error = "data.json is missing; the running state was not replaced." }, null);
+                return new(null, new() { Outcome = "invalid", Error = "data.json is missing; the running state was not replaced." }, null, null);
             if (_reloadAcceptedBytes != null && bytes.AsSpan().SequenceEqual(_reloadAcceptedBytes))
-                return new(null, new() { Revision = _reloadRevision }, null);
+                return new(null, new() { Revision = _reloadRevision }, null, null);
 
             var text = DecodeStateBytes(bytes);
             var document = ParseObject(text);
@@ -199,21 +199,21 @@ public sealed partial class StateStore
                 ConflictDiffFile = diffFile,
                 Revision = _reloadRevision,
                 RestartRequired = !string.Equals(memory.UiLanguage, candidate.UiLanguage, StringComparison.Ordinal)
-            }, conflictCount > 0 ? merge.Conflicts : null);
+            }, conflictCount > 0 ? merge.Conflicts : null, (JsonObject)external.DeepClone());
         }
         catch (ExternalStatePendingException)
         {
             return new(null, new() { Outcome = "busy", Error = "data.json changed again during reload; retry with the latest file.",
-                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null);
+                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null, null);
         }
         catch (Exception ex) when (ex is JsonException or DecoderFallbackException or ArgumentException)
         {
-            return new(null, new() { Outcome = "invalid", Error = ex.Message }, null);
+            return new(null, new() { Outcome = "invalid", Error = ex.Message }, null, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             return new(null, new() { Outcome = "failed", Error = ex.Message,
-                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null);
+                ConflictCount = conflictCount, ConflictFile = conflictFile, ConflictDiffFile = diffFile }, null, null);
         }
         finally { _writeLock.Release(); }
     }

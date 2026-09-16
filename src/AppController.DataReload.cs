@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
@@ -13,7 +14,8 @@ public sealed partial class AppController
 {
     private sealed record PendingDataReload(AppState Before, AppState Next,
         DataReloadResult Result, PaperOperationContext Origin,
-        IReadOnlyList<StateMergeConflict>? Conflicts);
+        IReadOnlyList<StateMergeConflict>? Conflicts,
+        JsonObject? ExternalJson);
 
     private FileSystemWatcher? _dataWatcher;
     private DispatcherTimer? _dataReloadTimer;
@@ -140,7 +142,7 @@ public sealed partial class AppController
             _saveTimer.Stop();
             _forceSaveTimer.Stop();
             _hasPendingDirty = false;
-            _pendingDataReload = new(before, commit.State, commit.Result, origin, commit.Conflicts);
+            _pendingDataReload = new(before, commit.State, commit.Result, origin, commit.Conflicts, commit.ExternalJson);
             // A plugin can delete its own paper through this call. Return to the caller before
             // tearing down that session/runtime. Send precedes the next input/render/timer turn;
             // shared commands and saves remain gated until the committed model is reconciled.
@@ -340,7 +342,16 @@ public sealed partial class AppController
     }
 
     /// <summary>
-    /// 当 pending.Conflicts 非空时,逐一弹窗让用户选保留当前/保留传入。
+    /// 测试 seam:用 lambda 替换真实 dialog 调用,返回任意 PaperConflictChoice 或 ConflictChoice。
+    /// 默认 null → 用真实弹窗;测试可设为 "(owner, bucket) => PaperConflictChoice.KeepExternal"。
+    /// 返回值的运行时类型决定走 paper 分支还是 leaf 分支;其它返回 null 等价于关闭弹窗(KeepMemory)。
+    /// </summary>
+    internal static Func<Window?, ConflictBucket, object?>? ConflictDialogDriver;
+
+    /// <summary>
+    /// 当 pending.Conflicts 非空时,按 ID 聚合后逐桶弹窗让用户选保留当前/保留传入。
+    /// 同一 paper 下的所有 leaf 冲突聚合到一个 PaperBucket,只弹一次 paper 级弹窗;
+    /// 不可聚合的路径(papers.$order / $ / 孤立 leaf)走既有 leaf 弹窗。
     /// 返回应用了用户决策后的 effectiveNext。
     /// </summary>
     private AppState ResolveConflictsInteractively(PendingDataReload pending)
@@ -348,19 +359,73 @@ public sealed partial class AppController
         var conflicts = pending.Conflicts;
         if (conflicts == null || conflicts.Count == 0) return pending.Next;
 
+        var buckets = ConflictAggregator.Group(conflicts, pending.ExternalJson);
+        if (buckets.Count == 0) return pending.Next;
+
         var owner = SelectDialogOwner();
-        var choices = new Dictionary<string, ConflictChoice>(StringComparer.Ordinal);
-        foreach (var conflict in conflicts)
+        var paperChoices = new Dictionary<string, PaperConflictChoice>(StringComparer.Ordinal);
+        var leafChoices = new Dictionary<string, ConflictChoice>(StringComparer.Ordinal);
+
+        foreach (var bucket in buckets)
         {
-            var choice = DataReloadConflictDialog.Show(owner, conflict);
-            // 用户关闭/X/Esc → Show 返回 KeepMemory;选择 KeepExternal 才覆盖
-            if (choice == ConflictChoice.KeepExternal)
+            switch (bucket)
             {
-                choices[conflict.Path] = choice;
+                case PaperBucket paperBucket:
+                {
+                    var choice = InvokePaperDialog(owner, paperBucket);
+                    if (choice == PaperConflictChoice.KeepExternal)
+                        paperChoices[paperBucket.PaperId] = choice;
+                    break;
+                }
+
+                case OrderBucket orderBucket:
+                case UnknownBaselineBucket unknownBucket:
+                case SingleLeafBucket singleBucket:
+                {
+                    var leaf = bucket switch
+                    {
+                        OrderBucket o => o.Conflict,
+                        UnknownBaselineBucket u => u.Conflict,
+                        SingleLeafBucket s => s.Conflict,
+                        _ => null,
+                    };
+                    if (leaf == null) break;
+                    var choice = InvokeLeafDialog(owner, leaf);
+                    if (choice == ConflictChoice.KeepExternal)
+                        leafChoices[leaf.Path] = choice;
+                    break;
+                }
             }
         }
-        if (choices.Count == 0) return pending.Next;
-        return JsonPath.ApplyChoices(pending.Next, conflicts, choices);
+
+        var withLeafApplied = leafChoices.Count == 0
+            ? pending.Next
+            : JsonPath.ApplyChoices(pending.Next, conflicts, leafChoices);
+        return paperChoices.Count == 0 || pending.ExternalJson == null
+            ? withLeafApplied
+            : JsonPath.ApplyPaperChoices(withLeafApplied, paperChoices, pending.ExternalJson);
+    }
+
+    private static PaperConflictChoice InvokePaperDialog(Window? owner, PaperBucket bucket)
+    {
+        if (ConflictDialogDriver is { } driver)
+        {
+            var result = driver(owner, bucket);
+            if (result is PaperConflictChoice paper) return paper;
+            // null / 其它类型 → 关闭弹窗语义(KeepMemory)
+        }
+        return DataReloadPaperConflictDialog.Show(owner, bucket);
+    }
+
+    private static ConflictChoice InvokeLeafDialog(Window? owner, StateMergeConflict conflict)
+    {
+        if (ConflictDialogDriver is { } driver)
+        {
+            // 用一个最小的 SingleLeafBucket 承载 leaf 冲突,便于测试 lambda 单一签名
+            var result = driver(owner, new SingleLeafBucket(conflict));
+            if (result is ConflictChoice leaf) return leaf;
+        }
+        return DataReloadConflictDialog.Show(owner, conflict);
     }
 
     private Window? SelectDialogOwner()
