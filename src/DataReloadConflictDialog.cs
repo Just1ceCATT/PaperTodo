@@ -38,6 +38,34 @@ internal static class DataReloadConflictDialog
     }
 }
 
+/// <summary>
+/// paper 级冲突弹窗:同一 paper 下的所有字段冲突一次展示,用户二选一整张 paper。
+/// 默认(关闭/X/Esc)=KeepMemory;用户点 "全部保留传入" 才会用外部覆盖整张 paper。
+/// </summary>
+internal static class DataReloadPaperConflictDialog
+{
+    /// <summary>
+    /// 弹一个 modal paper 级 dialog,返回用户选择。
+    /// </summary>
+    public static PaperConflictChoice Show(Window? owner, PaperBucket bucket)
+    {
+        var dialog = new DataReloadPaperConflictDialogWindow(bucket);
+        if (owner != null && PresentationSource.FromVisual(owner) is HwndSource)
+        {
+            dialog.Owner = owner;
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        }
+        else
+        {
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        var keepExternal = dialog.ShowDialog() == true;
+        dialog.Close();
+        return keepExternal ? PaperConflictChoice.KeepExternal : PaperConflictChoice.KeepMemory;
+    }
+}
+
 internal sealed class DataReloadConflictDialogWindow : Window
 {
     public DataReloadConflictDialogWindow(StateMergeConflict conflict)
@@ -190,6 +218,214 @@ internal sealed class DataReloadConflictDialogWindow : Window
 
         root.Child = content;
         Content = root;
+    }
+}
+
+/// <summary>
+/// paper 级冲突弹窗:同一 paper 的所有 leaf 冲突一次性展示。
+/// 顶部头部一行显示 paper ID 与类型,中间字段列表(每个有差异字段一对左右 diff 面板),
+/// 底部"全部保留当前 / 全部保留传入"两个按钮二选一。
+/// </summary>
+internal sealed class DataReloadPaperConflictDialogWindow : Window
+{
+    public DataReloadPaperConflictDialogWindow(PaperBucket bucket)
+    {
+        Title = Strings.Get("DataReloadPaperConflictTitle");
+        Width = 880;
+        Height = 640;
+        MinWidth = 620;
+        MinHeight = 420;
+        SizeToContent = SizeToContent.Manual;
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.CanResize;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
+        ShowInTaskbar = false;
+        FontFamily = AppTypography.UiFontFamily;
+        FontSize = AppTypography.Scale(12);
+        Language = AppTypography.Language;
+        SnapsToDevicePixels = true;
+        UseLayoutRounding = true;
+        AppTypography.ApplyTextRendering(this);
+
+        var root = new Border
+        {
+            Margin = new Thickness(10),
+            Padding = new Thickness(18, 16, 18, 16),
+            Background = Theme.PaperBrush,
+            BorderBrush = Theme.PaperBorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Effect = new DropShadowEffect
+            {
+                BlurRadius = 20,
+                ShadowDepth = 3,
+                Opacity = Theme.IsDark ? 0.34 : 0.2
+            }
+        };
+
+        var content = new DockPanel { LastChildFill = true };
+
+        // 顶部:标题 + 关闭按钮
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var titleText = new TextBlock
+        {
+            Text = Strings.Get("DataReloadPaperConflictTitle"),
+            Foreground = Theme.TextBrush,
+            FontSize = AppTypography.Scale(14),
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+        Grid.SetColumn(titleText, 0);
+        headerGrid.Children.Add(titleText);
+
+        var closeBtn = new Button
+        {
+            Content = "×",
+            Width = 28,
+            Height = 24,
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            Foreground = Theme.TextBrush,
+            BorderBrush = Brushes.Transparent,
+            FontSize = AppTypography.Scale(16),
+            IsCancel = true,
+            Cursor = Cursors.Hand
+        };
+        closeBtn.Click += (_, _) => { DialogResult = false; };
+        Grid.SetColumn(closeBtn, 1);
+        headerGrid.Children.Add(closeBtn);
+        DockPanel.SetDock(headerGrid, Dock.Top);
+        content.Children.Add(headerGrid);
+
+        // Paper ID + 类型行
+        var paperHeaderText = new TextBlock
+        {
+            Text = Strings.Format("DataReloadPaperConflictHeader", bucket.PaperId, bucket.PaperType),
+            Foreground = Theme.WeakTextBrush,
+            FontSize = AppTypography.Scale(11),
+            Margin = new Thickness(0, 8, 0, 8),
+            TextWrapping = TextWrapping.Wrap
+        };
+        DockPanel.SetDock(paperHeaderText, Dock.Top);
+        content.Children.Add(paperHeaderText);
+
+        // 底部:两个按钮
+        var buttonRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        var keepMemoryBtn = new Button
+        {
+            Content = Strings.Get("DataReloadPaperConflictKeepAllMemory"),
+            MinWidth = 160,
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsCancel = true,
+            Cursor = Cursors.Hand
+        };
+        keepMemoryBtn.Click += (_, _) => { DialogResult = false; };
+        buttonRow.Children.Add(keepMemoryBtn);
+
+        var keepExternalBtn = new Button
+        {
+            Content = Strings.Get("DataReloadPaperConflictKeepAllExternal"),
+            MinWidth = 160,
+            Padding = new Thickness(14, 6, 14, 6),
+            IsDefault = true,
+            Cursor = Cursors.Hand
+        };
+        keepExternalBtn.Click += (_, _) => { DialogResult = true; };
+        buttonRow.Children.Add(keepExternalBtn);
+        DockPanel.SetDock(buttonRow, Dock.Bottom);
+        content.Children.Add(buttonRow);
+
+        // 中间:字段列表(每个有差异字段一组左右 diff 面板,所有面板共享一个 ScrollSyncGroup)
+        var fieldsPanel = new StackPanel();
+        var sync = new DataReloadConflictUi.ScrollSyncGroup();
+
+        // 整张 paper 整节点冲突时,bucket.Conflicts 长度为 1 且 path 是 "papers[id=X]"
+        // 仍然渲染为单个 "整张 paper" 字段块,内部直接对比两个完整 paper JsonObject
+        // 普通多字段:按 conflict 顺序逐条渲染,字段短路径来自 conflict.Path 去掉前缀
+        var prefix = $"papers[id={bucket.PaperId}].";
+        foreach (var conflict in bucket.Conflicts)
+        {
+            var fieldLabel = StripPrefix(conflict.Path, prefix);
+            var memoryText = DataReloadConflictUi.FormatConflictValue(conflict.PaperTodoExists, conflict.PaperTodo);
+            var externalText = DataReloadConflictUi.FormatConflictValue(conflict.ExternalExists, conflict.External);
+
+            var groupBlock = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+
+            // 字段名分组小标题
+            var fieldHeader = new TextBlock
+            {
+                Text = Strings.Format("DataReloadPaperConflictField", fieldLabel),
+                Foreground = Theme.TextBrush,
+                FontSize = AppTypography.Scale(12),
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            groupBlock.Children.Add(fieldHeader);
+
+            // 左右并排 diff 面板
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var memoryPanel = DataReloadConflictUi.BuildDiffPanel(
+                Strings.Get("DataReloadConflictMemoryHeader"),
+                memoryText,
+                externalText,
+                DataReloadConflictUi.LineMark.OnlyInMemory,
+                sync);
+            Grid.SetColumn(memoryPanel.root, 0);
+            grid.Children.Add(memoryPanel.root);
+
+            var externalPanel = DataReloadConflictUi.BuildDiffPanel(
+                Strings.Get("DataReloadConflictExternalHeader"),
+                externalText,
+                memoryText,
+                DataReloadConflictUi.LineMark.OnlyInExternal,
+                sync);
+            Grid.SetColumn(externalPanel.root, 2);
+            grid.Children.Add(externalPanel.root);
+
+            groupBlock.Children.Add(grid);
+            fieldsPanel.Children.Add(groupBlock);
+        }
+
+        var scrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = fieldsPanel,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0, 0, 0, 4)
+        };
+        content.Children.Add(scrollViewer);
+
+        root.Child = content;
+        Content = root;
+    }
+
+    /// <summary>
+    /// 把 conflict.Path 去掉 "papers[id=X]." 前缀,得到字段展示标签(title / items[id=Y].text / ...)。
+    /// 如果 path 本身就是 "papers[id=X]"(整节点),则返回 "(整张 paper)";空前缀返回原 path。
+    /// </summary>
+    private static string StripPrefix(string path, string prefix)
+    {
+        if (string.Equals(path, prefix.TrimEnd('.'), StringComparison.Ordinal))
+            return Strings.Get("DataReloadPaperConflictWholePaper");
+        if (path.StartsWith(prefix, StringComparison.Ordinal))
+            return path.Substring(prefix.Length);
+        return path;
     }
 }
 

@@ -1673,4 +1673,22 @@
   <data name="DataReloadConflictExternalOnlyTooltip" xml:space="preserve">
     <value>外部文件中有,当前 PaperTodo 内存中没有。"保留传入" 会采用;"保留当前" 会丢弃。</value>
   </data>
+  <data name="DataReloadPaperConflictTitle" xml:space="preserve">
+    <value>Paper 数据冲突</value>
+  </data>
+  <data name="DataReloadPaperConflictHeader" xml:space="preserve">
+    <value>Paper ID:{0}  类型:{1}</value>
+  </data>
+  <data name="DataReloadPaperConflictField" xml:space="preserve">
+    <value>字段:{0}</value>
+  </data>
+  <data name="DataReloadPaperConflictKeepAllMemory" xml:space="preserve">
+    <value>全部保留当前</value>
+  </data>
+  <data name="DataReloadPaperConflictKeepAllExternal" xml:space="preserve">
+    <value>全部保留传入</value>
+  </data>
+  <data name="DataReloadPaperConflictWholePaper" xml:space="preserve">
+    <value>(整张 paper)</value>
+  </data>
 </root>
