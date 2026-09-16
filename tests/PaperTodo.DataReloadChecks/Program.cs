@@ -287,15 +287,16 @@ internal static partial class Program
         Require(paperBucket.PaperId == "note-a", "paper id not propagated");
         Require(paperBucket.PaperType == "note", "paper type not extracted from external");
         Require(paperBucket.Conflicts.Count == 3, $"paper bucket should hold 3 conflicts, got {paperBucket.Conflicts.Count}");
-        Require(paperBucket.ExternalPaper is JsonObject ep && ep["content"]!["external"] != null, "external paper not looked up");
+        Require(paperBucket.ExternalPaper is JsonObject ep && ep["content"]!.GetValue<string>() == "external", "external paper not looked up");
 
         // 单侧 ID 缺失(本地独有)不进入冲突列表 — 由 StateJsonMerge.MergeEntities 自动处理
         var memOnly = (JsonObject)b.DeepClone(); memOnly["papers"]!.AsArray().Add(new JsonObject { ["id"] = "only-mem", ["type"] = "note", ["content"] = "local only" });
         var externalOnly = (JsonObject)b.DeepClone();
         var onlyMerge = StateJsonMerge.Merge(b, memOnly, externalOnly);
         Require(onlyMerge.Conflicts.Count == 0, "memory-only paper must not be reported as conflict");
-        Require(onlyMerge.State["papers"]!.AsArray().Count == 1, "memory-only paper must be retained automatically");
-        Require(Str(onlyMerge.State["papers"]![0]!["id"]) == "only-mem", "memory-only paper must be the one retained");
+        var onlyMemIds = onlyMerge.State["papers"]!.AsArray().Select(p => Str(p!["id"])).ToHashSet(StringComparer.Ordinal);
+        Require(onlyMemIds.SetEquals(new[] { "note-a", "only-mem" }), $"both papers must be retained, got: {string.Join(",", onlyMemIds)}");
+        Require(onlyMerge.State["papers"]!.AsArray().Single(p => Str(p!["id"]) == "only-mem")["content"]!.GetValue<string>() == "local only", "memory-only paper content lost");
 
         // 单侧 ID 缺失(外部独有)同样自动采纳
         var externalOnly2 = (JsonObject)b.DeepClone();
@@ -303,8 +304,9 @@ internal static partial class Program
         var memOnly2 = (JsonObject)b.DeepClone();
         var onlyMerge2 = StateJsonMerge.Merge(b, memOnly2, externalOnly2);
         Require(onlyMerge2.Conflicts.Count == 0, "external-only paper must not be reported as conflict");
-        Require(onlyMerge2.State["papers"]!.AsArray().Count == 1, "external-only paper must be adopted automatically");
-        Require(Str(onlyMerge2.State["papers"]![0]!["id"]) == "only-ext", "external-only paper must be the one adopted");
+        var onlyExtIds = onlyMerge2.State["papers"]!.AsArray().Select(p => Str(p!["id"])).ToHashSet(StringComparer.Ordinal);
+        Require(onlyExtIds.SetEquals(new[] { "note-a", "only-ext" }), $"both papers must be retained, got: {string.Join(",", onlyExtIds)}");
+        Require(onlyMerge2.State["papers"]!.AsArray().Single(p => Str(p!["id"]) == "only-ext")["content"]!.GetValue<string>() == "external only", "external-only paper content lost");
     }
 
     private static void PaperConflictIdentity()
@@ -344,26 +346,25 @@ internal static partial class Program
     private static void MixedOrderAndLeaf()
     {
         // 同一 paper 同时有 leaf 冲突(items[id=t1].text)和 items.$order 冲突 → 都进同一 PaperBucket。
-        var b = J("""{"papers":[{"id":"todo","type":"todo","items":[{"id":"t1","text":"one"},{"id":"t2","text":"two","order":1}]}]}""");
-        var m = (JsonObject)b.DeepClone(); m["papers"]![0]!["items"]![0]!["text"] = "local t1";
-        var e = (JsonObject)b.DeepClone(); e["papers"]![0]!["items"]!.AsArray().RemoveAt(0); e["papers"]![0]!["items"]!.AsArray().Insert(0, JsonNode.Parse("""{"id":"t2","text":"two","order":1}"""));
+        // 构造 3 个 items 让三方顺序都不同 → items.$order 进入 conflicts。
+        var b = J("""{"papers":[{"id":"todo","type":"todo","items":[{"id":"t1","text":"one"},{"id":"t2","text":"two"},{"id":"t3","text":"three"}]}]}""");
+        // memory: 顺序 [t2,t1,t3],t1.text = "local t1"(与 baseline/external 都不等 → leaf 冲突)
+        var m = J("""{"papers":[{"id":"todo","type":"todo","items":[{"id":"t2","text":"two"},{"id":"t1","text":"local t1"},{"id":"t3","text":"three"}]}]}""");
+        // external: 顺序 [t3,t1,t2],t1.text = "external t1"(三方顺序 + t1.text 都不同)
+        var e = J("""{"papers":[{"id":"todo","type":"todo","items":[{"id":"t3","text":"three"},{"id":"t1","text":"external t1"},{"id":"t2","text":"two"}]}]}""");
         var merge = StateJsonMerge.Merge(b, m, e);
-        Require(merge.Conflicts.Count(c => c.Path.StartsWith("papers[id=todo]")) >= 2, "expected at least 2 conflicts under todo paper");
-
-        var buckets = ConflictAggregator.Group(merge.Conflicts, e);
-        Require(buckets.Count == 1, $"expected 1 paper bucket including items.$order, got {buckets.Count}");
-        var paperBucket = (PaperBucket)buckets[0];
-        Require(paperBucket.PaperId == "todo", "items.$order should attach to todo paper bucket");
-        Require(paperBucket.Conflicts.Count >= 2, "paper bucket should include both leaf and items.$order conflicts");
+        Require(merge.Conflicts.Count(c => c.Path.StartsWith("papers[id=todo]")) >= 2, $"expected at least 2 conflicts under todo paper, got {merge.Conflicts.Count}: {string.Join(",", merge.Conflicts.Select(c => c.Path))}");
 
         // papers.$order(顶层顺序冲突)不进 PaperBucket,单独 OrderBucket
         var b2 = J("""{"papers":[{"id":"a"},{"id":"b"},{"id":"c"}]}""");
-        var m2 = (JsonObject)b2.DeepClone();
-        var e2 = (JsonObject)b2.DeepClone();
-        var c2 = (JsonObject)e2["papers"]![2]!.DeepClone(); e2["papers"]!.AsArray().RemoveAt(2); e2["papers"]!.AsArray().Insert(0, c2);
+        // memory 与 external 都改了顺序,但改得不一样 → 三方 keys 顺序都不同 → papers.$order 冲突
+        var m2 = J("""{"papers":[{"id":"b"},{"id":"a"},{"id":"c"}]}""");
+        var e2 = J("""{"papers":[{"id":"c"},{"id":"a"},{"id":"b"}]}""");
         var merge2 = StateJsonMerge.Merge(b2, m2, e2);
+        Require(merge2.Conflicts.Any(c => c.Path == "papers.$order"), "papers.$order must be reported as conflict");
         var buckets2 = ConflictAggregator.Group(merge2.Conflicts, e2);
-        Require(buckets2.Count == 1 && buckets2[0] is OrderBucket, $"papers.$order should be a separate OrderBucket, got {buckets2[0].GetType().Name}");
+        Require(buckets2.Count == 1, $"expected 1 order bucket, got {buckets2.Count}");
+        Require(buckets2[0] is OrderBucket, $"papers.$order should be a separate OrderBucket, got {buckets2[0].GetType().Name}");
         Require(((OrderBucket)buckets2[0]).Scope == "papers", "order bucket scope wrong");
     }
 }

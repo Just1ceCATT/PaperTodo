@@ -168,6 +168,62 @@ internal static partial class Program
             }
             Console.WriteLine("PASS Native runtime thread dispatch without new plugin permissions");
 
+            // 同一 paper 的多字段冲突必须聚合到一个 paper 级弹窗,而不是 N 个 leaf 弹窗。
+            // 测试通过 ConflictDialogDriver seam 注入桩:所有 paper 桶都选 KeepExternal,
+            // 全部 leaf 桶都选 KeepExternal;记录 driver 调用次数验证聚合(应为 1 次 paper + 0 leaf)。
+            controller.SaveNow(sync: true);
+            // 用全新的 paper id 避免被之前测试的 disk 修改干扰 baseline。
+            const string freshPaperId = "fresh-conflict-paper";
+            var freshPaper = new PaperData { Id = freshPaperId, Type = PaperTypes.Note, Content = "fresh", X = 100, Y = 100 };
+            controller.State.Papers.Add(freshPaper);
+            controller.SaveNow(sync: true);
+
+            // 内存改 fresh paper 的 title/content(与即将写入 disk 的不同)。
+            // Title 限制 6 字符(PaperTitles.DefaultMaxTitleLength),用短字符串。
+            var freshRef = controller.State.Papers.Single(p => p.Id == freshPaperId);
+            freshRef.Title = "MEM";
+            freshRef.Content = "local body";
+
+            // disk 改 fresh paper 的 content/title/x — 三方对 content/title 都不同 → 2+ 冲突
+            var conflictEdit = ReadLive();
+            LivePaper(conflictEdit, freshPaperId)["content"] = "external body";
+            LivePaper(conflictEdit, freshPaperId)["title"] = "EXT";
+            LivePaper(conflictEdit, freshPaperId)["x"] = 250;
+            WriteLive(conflictEdit);
+
+            var driverCalls = new List<ConflictBucket>();
+            var previousDriver = AppController.ConflictDialogDriver;
+            AppController.ConflictDialogDriver = (owner, bucket) =>
+            {
+                driverCalls.Add(bucket);
+                return bucket is PaperBucket
+                    ? (object)PaperConflictChoice.KeepExternal
+                    : ConflictChoice.KeepExternal;
+            };
+            try
+            {
+                var conflictResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
+                Require(conflictResult.Applied && conflictResult.ConflictCount >= 2, $"expected at least 2 leaf conflicts, got {conflictResult.ConflictCount}");
+                await Until(() => !controller.IsDataReloading, "paper conflict reload");
+                Require(driverCalls.Count == 1, $"expected 1 aggregated paper dialog, got {driverCalls.Count}");
+                var firstBucket = driverCalls[0];
+                Require(firstBucket is PaperBucket, $"expected paper bucket, got {firstBucket.GetType().Name}");
+                var paperBucket = (PaperBucket)firstBucket;
+                Require(paperBucket.PaperId == freshPaperId, $"paper id mismatch: {paperBucket.PaperId}");
+                var appliedFresh = controller.State.Papers.Single(p => p.Id == freshPaperId);
+                Require(appliedFresh.Content == "external body" && appliedFresh.Title == "EXT", "paper-level KeepExternal did not apply external values");
+                Require(ReferenceEquals(freshRef, appliedFresh), $"{freshPaperId} identity broken after paper-level apply");
+                var diffFile = conflictResult.ConflictDiffFile;
+                Require(diffFile != null, "paper conflict did not write dataconflictdiff");
+                var diff = J(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, diffFile!)));
+                Require(diff["conflicts"]!.AsArray().All(c => Str(c!["path"]!).StartsWith($"papers[id={freshPaperId}]")), $"leaf paths in diff must remain under papers[id={freshPaperId}]");
+            }
+            finally
+            {
+                AppController.ConflictDialogDriver = previousDriver;
+            }
+            Console.WriteLine("PASS live paper-level conflict aggregation, identity, diff unchanged, KeepExternal applied");
+
             controller.SaveNow(sync: true);
             var deletion = ReadLive(); deletion["papers"]!.AsArray().Remove(LivePaper(deletion, "note-a")); WriteLive(deletion);
             Require(native.ReloadData().Applied && !noteA.IsClosed, "originating session closed before API returned");
@@ -188,53 +244,7 @@ internal static partial class Program
             await Until(() => !controller.IsDataReloading, "expand reload");
             Require(windows["note-b"].HasExpandedPaperSurface, "expanded paper not displayed");
             Console.WriteLine("PASS existing capsule/form presentation path");
-
-            // 同一 paper 的多字段冲突必须聚合到一个 paper 级弹窗,而不是 N 个 leaf 弹窗。
-            // 测试通过 ConflictDialogDriver seam 注入桩:所有 paper 桶都选 KeepExternal,
-            // 全部 leaf 桶都选 KeepExternal;记录 driver 调用次数验证聚合(应为 1 次 paper + 0 leaf)。
-            controller.SaveNow(sync: true);
-            var noteARef = controller.State.Papers.Single(p => p.Id == "note-a");
-            noteARef.Content = "local body";
-            noteARef.Title = "local title";
-            var conflictEdit = ReadLive();
-            LivePaper(conflictEdit, "note-a")["content"] = "external body";
-            LivePaper(conflictEdit, "note-a")["title"] = "external title";
-            LivePaper(conflictEdit, "note-a")["x"] = 200;
-            WriteLive(conflictEdit);
-            var driverCalls = new List<ConflictBucket>();
-            var previousDriver = AppController.ConflictDialogDriver;
-            AppController.ConflictDialogDriver = (owner, bucket) =>
-            {
-                driverCalls.Add(bucket);
-                return bucket switch
-                {
-                    PaperBucket => PaperConflictChoice.KeepExternal,
-                    SingleLeafBucket => ConflictChoice.KeepExternal,
-                    OrderBucket => ConflictChoice.KeepExternal,
-                    UnknownBaselineBucket => ConflictChoice.KeepExternal,
-                    _ => null,
-                };
-            };
-            try
-            {
-                var conflictResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
-                Require(conflictResult.Applied && conflictResult.ConflictCount >= 2, "expected at least 2 leaf conflicts for note-a");
-                await Until(() => !controller.IsDataReloading, "paper conflict reload");
-                Require(driverCalls.Count == 1, $"expected 1 aggregated paper dialog, got {driverCalls.Count}");
-                Require(driverCalls[0] is PaperBucket pb && pb.PaperId == "note-a", "aggregated dialog must be note-a paper bucket");
-                var appliedNoteA = controller.State.Papers.Single(p => p.Id == "note-a");
-                Require(appliedNoteA.Content == "external body" && appliedNoteA.Title == "external title", "paper-level KeepExternal did not apply external values");
-                Require(ReferenceEquals(noteARef, appliedNoteA), "note-a identity broken after paper-level apply");
-                var diffFile = conflictResult.ConflictDiffFile;
-                Require(diffFile != null, "paper conflict did not write dataconflictdiff");
-                var diff = J(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, diffFile!)));
-                Require(diff["conflicts"]!.AsArray().All(c => Str(c!["path"]!).StartsWith("papers[id=note-a]")), "leaf paths in diff must remain under papers[id=note-a]");
-            }
-            finally
-            {
-                AppController.ConflictDialogDriver = previousDriver;
-            }
-            Console.WriteLine("PASS live paper-level conflict aggregation, identity, diff unchanged, KeepExternal applied");
+        }
         finally
         {
             controller.Dispose();
