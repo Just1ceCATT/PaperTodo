@@ -230,6 +230,176 @@ internal static partial class Program
             }
             Console.WriteLine("PASS live paper-level conflict aggregation, identity, diff unchanged, KeepExternal applied, disk synced");
 
+            // KeepMemory 对称路径:同一 paper 的多字段冲突,driver 返回 KeepMemory 时磁盘也必须
+            // 同步反映 memory 版本(避免 1-10s autosave 延迟)。覆盖 SaveNow(sync:true) 在
+            // KeepMemory 路径上的 disk 同步保证,与 KeepExternal 段对称。
+            controller.SaveNow(sync: true);
+            const string kmPaperId = "keep-memory-conflict-paper";
+            var kmPaper = new PaperData { Id = kmPaperId, Type = PaperTypes.Note, Content = "km-fresh", X = 100, Y = 100 };
+            controller.State.Papers.Add(kmPaper);
+            controller.SaveNow(sync: true);
+            var kmRef = controller.State.Papers.Single(p => p.Id == kmPaperId);
+            kmRef.Title = "KM-MEM";
+            kmRef.Content = "local km body";
+            var kmEdit = ReadLive();
+            LivePaper(kmEdit, kmPaperId)["content"] = "external km body";
+            LivePaper(kmEdit, kmPaperId)["title"] = "KM-EXT";
+            WriteLive(kmEdit);
+            AppController.ConflictDialogDriver = (owner, bucket) =>
+                bucket is PaperBucket ? (object)PaperConflictChoice.KeepMemory : ConflictChoice.KeepMemory;
+            try
+            {
+                var kmResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
+                Require(kmResult.Applied && kmResult.ConflictCount >= 2, $"expected at least 2 leaf conflicts, got {kmResult.ConflictCount}");
+                await Until(() => !controller.IsDataReloading, "paper keep-memory conflict reload");
+                var kmApplied = controller.State.Papers.Single(p => p.Id == kmPaperId);
+                Require(kmApplied.Content == "local km body" && kmApplied.Title == "KM-MEM", "KeepMemory did not retain memory values in state");
+                var kmDiskAfter = ReadLive();
+                var kmDiskFresh = kmDiskAfter["papers"]!.AsArray().Single(p => Str(p!["id"]) == kmPaperId);
+                Require(Str(kmDiskFresh["content"]) == "local km body", $"disk Content should be 'local km body' after KeepMemory, got '{Str(kmDiskFresh["content"])}'");
+                Require(Str(kmDiskFresh["title"]) == "KM-MEM", $"disk Title should be 'KM-MEM' after KeepMemory, got '{Str(kmDiskFresh["title"])}'");
+            }
+            finally
+            {
+                AppController.ConflictDialogDriver = previousDriver;
+            }
+            Console.WriteLine("PASS live paper-level conflict KeepMemory path disk synced");
+
+            // UnknownBaseline + KeepExternal:整状态替换场景。
+            // disk baseline 不匹配($paperTodoRevision="unknown")→ StateStore.Reload.cs:225
+            // 走 unknown_baseline 分支,只产生一个 path=="$" 的冲突进 UnknownBaselineBucket。
+            // P0 修复让弹窗 KeepExternal 真正让 disk 反映 external 内容(整 state 替换)。
+            controller.SaveNow(sync: true);
+            const string ubExt1Id = "ub-ext-1";
+            const string ubMemOnlyId = "ub-mem-only";
+
+            // 内存准备:theme="light"、ext-1(content="mem")、独有 mem-only。
+            controller.State.Theme = "light";
+            if (!controller.State.Papers.Any(p => p.Id == ubExt1Id))
+                controller.State.Papers.Add(new() { Id = ubExt1Id, Type = PaperTypes.Note, Content = "mem", X = 100, Y = 100 });
+            if (!controller.State.Papers.Any(p => p.Id == ubMemOnlyId))
+                controller.State.Papers.Add(new() { Id = ubMemOnlyId, Type = PaperTypes.Note, Content = "memory-only", X = 200, Y = 200 });
+            controller.SaveNow(sync: true);
+
+            var ubExt1Ref = controller.State.Papers.Single(p => p.Id == ubExt1Id);
+
+            // 改 disk:删 mem-only、改 ext-1 content="ext"、改 theme="dark"、
+            // $paperTodoRevision="unknown",让 baseline 在 reload history 中找不到匹配,
+            // 触发 unknown_baseline 整状态冲突。disk 上不写 mem-only,以便验证整状态替换后
+            // memory 独有的 mem-only 被丢弃。
+            var ubEdit = ReadLive();
+            var ubPapersArray = ubEdit["papers"]!.AsArray();
+            var ubMemOnlyNode = ubPapersArray.SingleOrDefault(p => Str(p!["id"]) == ubMemOnlyId);
+            if (ubMemOnlyNode != null) ubPapersArray.Remove(ubMemOnlyNode);
+            ubEdit[StateStore.ReloadRevisionProperty] = "unknown";
+            ubEdit["theme"] = "dark";
+            LivePaper(ubEdit, ubExt1Id)["content"] = "ext";
+            WriteLive(ubEdit);
+
+            AppController.ConflictDialogDriver = (owner, bucket) => ConflictChoice.KeepExternal;
+            try
+            {
+                var ubResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
+                Require(ubResult.Applied && ubResult.ConflictCount == 1,
+                    $"expected 1 unknown-baseline conflict, got {ubResult.ConflictCount}");
+                await Until(() => !controller.IsDataReloading, "unknown-baseline apply");
+                Require(controller.State.Theme == "dark",
+                    $"external theme did not replace, got '{controller.State.Theme}'");
+                var ubExt1Applied = controller.State.Papers.Single(p => p.Id == ubExt1Id);
+                Require(ubExt1Applied.Content == "ext",
+                    $"ext-1 content not replaced, got '{ubExt1Applied.Content}'");
+                Require(!controller.State.Papers.Any(p => p.Id == ubMemOnlyId),
+                    "mem-only should be dropped after whole-external replace");
+                Require(ReferenceEquals(ubExt1Ref, ubExt1Applied),
+                    "ext-1 PaperData identity broken after whole-external apply");
+                var ubDiskAfter = ReadLive();
+                Require(Str(ubDiskAfter["theme"]) == "dark",
+                    $"disk theme should be 'dark' after KeepExternal, got '{Str(ubDiskAfter["theme"])}'");
+                var ubDiskExt1 = ubDiskAfter["papers"]!.AsArray().Single(p => Str(p!["id"]) == ubExt1Id);
+                Require(Str(ubDiskExt1["content"]) == "ext",
+                    $"disk ext-1 content should be 'ext' after KeepExternal, got '{Str(ubDiskExt1["content"])}'");
+                Require(!ubDiskAfter["papers"]!.AsArray().Any(p => Str(p!["id"]) == ubMemOnlyId),
+                    "disk should not contain mem-only after KeepExternal");
+                // 整状态替换下 memory 独有的 paper 不仅要从 State.Papers / disk 中移除,
+                // 还必须关掉对应的 window,否则旧胶囊会一直留在屏幕上。
+                Require(!windows.ContainsKey(ubMemOnlyId),
+                    "memory-only window survived whole-external replace");
+            }
+            finally
+            {
+                AppController.ConflictDialogDriver = previousDriver;
+            }
+            Console.WriteLine("PASS live unknown-baseline KeepExternal replaces whole state, drops memory-only papers, preserves shared identity, syncs disk");
+
+            // 场景 A:external 把 paper id 改了(rename)。close 循环必须用 effectiveNext 的 id 集合,
+            // 才能在 Apply 之前关掉旧 id 的 window,避免新 id 走 ShowPaper 新建、留下多胶囊叠加。
+            controller.SaveNow(sync: true);
+            const string renOldId = "ub-rename-old";
+            const string renNewId = "ub-rename-new";
+            if (!controller.State.Papers.Any(p => p.Id == renOldId))
+                controller.State.Papers.Add(new() { Id = renOldId, Type = PaperTypes.Note, Content = "mem-old", X = 100, Y = 100 });
+            controller.SaveNow(sync: true);
+
+            var renEdit = ReadLive();
+            var renPapersArray = renEdit["papers"]!.AsArray();
+            renPapersArray.Remove(renPapersArray.Single(p => Str(p!["id"]) == renOldId));
+            renPapersArray.Add(new JsonObject
+            {
+                ["id"] = renNewId, ["type"] = "note", ["content"] = "ext-new", ["x"] = 110, ["y"] = 110
+            });
+            renEdit[StateStore.ReloadRevisionProperty] = "unknown-rename";
+            WriteLive(renEdit);
+
+            AppController.ConflictDialogDriver = (owner, bucket) => ConflictChoice.KeepExternal;
+            try
+            {
+                var renResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
+                Require(renResult.Applied, "rename reload did not apply");
+                await Until(() => !controller.IsDataReloading, "rename apply");
+                Require(windows.ContainsKey(renNewId), $"renamed paper did not open a surface under '{renNewId}'");
+                Require(!windows.ContainsKey(renOldId), $"old-id window '{renOldId}' survived id rename");
+                var renApplied = controller.State.Papers.SingleOrDefault(p => p.Id == renNewId);
+                Require(renApplied != null && renApplied.Content == "ext-new",
+                    $"external rename content missing for '{renNewId}'");
+                Require(!controller.State.Papers.Any(p => p.Id == renOldId),
+                    $"old id '{renOldId}' leaked into State.Papers");
+            }
+            finally
+            {
+                AppController.ConflictDialogDriver = previousDriver;
+            }
+            Console.WriteLine("PASS live unknown-baseline KeepExternal closes old-id window when external renames paper id");
+
+            // 场景 B:external 把 paper 整个删了。close 循环必须识别到"旧 id 在 oldPapers 里、不在
+            // effectiveNext 里",才会在 Apply 之前关掉 window,否则 Apply 不再遍历该 paper → 永远泄漏。
+            controller.SaveNow(sync: true);
+            const string delMemId = "ub-delete-mem";
+            if (!controller.State.Papers.Any(p => p.Id == delMemId))
+                controller.State.Papers.Add(new() { Id = delMemId, Type = PaperTypes.Note, Content = "mem-del", X = 130, Y = 130 });
+            controller.SaveNow(sync: true);
+
+            var delEdit = ReadLive();
+            var delPapersArray = delEdit["papers"]!.AsArray();
+            delPapersArray.Remove(delPapersArray.Single(p => Str(p!["id"]) == delMemId));
+            delEdit[StateStore.ReloadRevisionProperty] = "unknown-delete";
+            WriteLive(delEdit);
+
+            AppController.ConflictDialogDriver = (owner, bucket) => ConflictChoice.KeepExternal;
+            try
+            {
+                var delResult = controller.PaperCommands.ReloadData(PaperOperationContext.Mcp());
+                Require(delResult.Applied, "delete reload did not apply");
+                await Until(() => !controller.IsDataReloading, "delete apply");
+                Require(!windows.ContainsKey(delMemId), $"external-deleted paper window '{delMemId}' leaked");
+                Require(!controller.State.Papers.Any(p => p.Id == delMemId),
+                    $"external-deleted paper '{delMemId}' leaked into State.Papers");
+            }
+            finally
+            {
+                AppController.ConflictDialogDriver = previousDriver;
+            }
+            Console.WriteLine("PASS live unknown-baseline KeepExternal closes external-deleted paper window");
+
             controller.SaveNow(sync: true);
             var deletion = ReadLive(); deletion["papers"]!.AsArray().Remove(LivePaper(deletion, "note-a")); WriteLive(deletion);
             Require(native.ReloadData().Applied && !noteA.IsClosed, "originating session closed before API returned");

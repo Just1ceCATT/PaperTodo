@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Windows;
@@ -26,13 +27,14 @@ public sealed partial class AppController
     private PendingDataReload? _pendingDataReload;
     private DateTimeOffset? _lastDataReloadAt;
     private DataReloadResult? _lastDataReloadResult;
-    private string? _lastDataReloadNotice;
 
     internal bool IsDataReloading => _dataReloadEvaluating || _applyingDataReload || _pendingDataReload != null;
     internal bool SuppressDataReloadEditorCommit => _applyingDataReload || _pendingDataReload != null;
 
     private void InitializeDataReload()
     {
+        DataReloadDiagnostics.Reset();
+        DataReloadDiagnostics.Log("RELOAD", "InitializeDataReload called");
         _store.EnableExternalReload(State);
         _dataReloadTimer = new DispatcherTimer(DispatcherPriority.Background, Application.Current.Dispatcher)
         {
@@ -65,13 +67,24 @@ public sealed partial class AppController
             _dataWatcher?.Dispose();
             _dataWatcher = null;
             _lastDataReloadResult = new() { Outcome = "failed", Error = ex.Message };
-            QueueDataReloadNotice(_lastDataReloadResult);
         }
     }
 
-    private void OnDataFileChanged(object sender, FileSystemEventArgs e) => QueueDataReload();
-    private void OnDataFileRenamed(object sender, RenamedEventArgs e) => QueueDataReload();
-    private void OnDataWatcherError(object sender, ErrorEventArgs e) => QueueDataReload();
+    private void OnDataFileChanged(object sender, FileSystemEventArgs e)
+    {
+        DataReloadDiagnostics.Log("FSW", $"Changed {e.ChangeType} {e.FullPath}");
+        QueueDataReload();
+    }
+    private void OnDataFileRenamed(object sender, RenamedEventArgs e)
+    {
+        DataReloadDiagnostics.Log("FSW", $"Renamed {e.OldFullPath} -> {e.FullPath}");
+        QueueDataReload();
+    }
+    private void OnDataWatcherError(object sender, ErrorEventArgs e)
+    {
+        DataReloadDiagnostics.Log("FSW", $"Error: {e.GetException()?.Message}");
+        QueueDataReload();
+    }
 
     private void QueueDataReload()
     {
@@ -91,7 +104,9 @@ public sealed partial class AppController
     {
         _dataReloadTimer!.Stop();
         if (IsExiting || !_store.HasExternalStateChange()) return;
+        DataReloadDiagnostics.Log("RELOAD", "Timer tick — calling ReloadDataCore");
         var result = ReloadDataCore(ImportDataOperation());
+        DataReloadDiagnostics.Log("RELOAD", $"ReloadDataCore returned outcome={result.Outcome} applied={result.Applied} conflictCount={result.ConflictCount}");
         // Only a real, outstanding change waits for an ongoing gesture/apply. Invalid JSON
         // waits for a new file event or explicit request, not a permanent retry loop.
         if (result.Outcome == "busy" && !IsExiting) _dataReloadTimer.Start();
@@ -131,11 +146,13 @@ public sealed partial class AppController
             PrepareExternalPaperOperation();
             var before = StateStore.CopyForReload(State);
             var commit = _store.ReloadExternalState(State, Interlocked.Increment(ref _saveVersion));
+            DataReloadDiagnostics.Log("RELOAD",
+                $"ReloadExternalState outcome={commit.Result.Outcome} applied={commit.Result.Applied} conflictCount={commit.Result.ConflictCount} " +
+                $"conflictFile={commit.Result.ConflictFile ?? "<none>"}");
             if (commit.Result.Outcome != "unchanged" || _lastDataReloadResult == null)
                 _lastDataReloadResult = commit.Result;
             if (commit.State == null)
             {
-                QueueDataReloadNotice(commit.Result);
                 return commit.Result;
             }
 
@@ -151,9 +168,9 @@ public sealed partial class AppController
         }
         catch (Exception ex)
         {
+            DataReloadDiagnostics.Log("RELOAD", $"ReloadDataCore threw {ex.GetType().Name}: {ex.GetBaseException().Message}");
             var result = new DataReloadResult { Outcome = "failed", Error = ex.GetBaseException().Message };
             _lastDataReloadResult = result;
-            QueueDataReloadNotice(result);
             return result;
         }
         finally { _dataReloadEvaluating = false; }
@@ -163,6 +180,8 @@ public sealed partial class AppController
     {
         var pending = _pendingDataReload;
         if (pending == null || _applyingDataReload || IsExiting) return;
+        DataReloadDiagnostics.Log("RELOAD",
+            $"CompletePendingDataReload start: conflicts={(pending.Conflicts?.Count ?? 0)}");
         _applyingDataReload = true;
         var suppressDirty = _suppressDirty;
         _suppressDirty = true;
@@ -174,7 +193,13 @@ public sealed partial class AppController
             _paperSurfaceRestoreGeneration++;
             _startupShellPrewarmGeneration++;
             var oldPapers = pending.Before.Papers.ToDictionary(p => p.Id, StringComparer.Ordinal);
-            var nextPapers = pending.Next.Papers.ToDictionary(p => p.Id, StringComparer.Ordinal);
+            // ====== 冲突时弹窗让用户决策(逐个冲突单选) ======
+            // 必须在 close 循环之前调用:UnknownBaselineBucket 的 KeepExternal 会让 effectiveNext
+            // 直接等于 disk externalJson(StateStore.Reload.cs:225 的 unknown_baseline 路径下
+            // pending.Next 仍为 memory 的 deep clone)。所有"按 id 集合决定关哪些 window / 清理哪些
+            // plugin 状态"的判断都要基于 effectiveNext,而不是 pending.Next。
+            var effectiveNext = ResolveConflictsInteractively(pending);
+            var nextPapers = effectiveNext.Papers.ToDictionary(p => p.Id, StringComparer.Ordinal);
             foreach (var pair in _windows.ToArray())
             {
                 if (!nextPapers.TryGetValue(pair.Key, out var next) ||
@@ -191,9 +216,6 @@ public sealed partial class AppController
                           oldPaper.CapsuleMonitorDeviceName != next.CapsuleMonitorDeviceName))
                     pair.Value.PrepareForCapsulePresentationModeChange();
             }
-
-            // ====== 冲突时弹窗让用户决策(逐个冲突单选) ======
-            var effectiveNext = ResolveConflictsInteractively(pending);
 
             StateReloadModels.Apply(State, effectiveNext);
             foreach (var paper in State.Papers)
@@ -242,17 +264,13 @@ public sealed partial class AppController
         }
         RefreshTrayMenu();
         PublishExternalPaperOperation(pending.Origin);
-        QueueDataReloadNotice(_lastDataReloadResult ?? pending.Result);
-        // 冲突对话框的 KeepExternal 会把 pending.Next.papers[X] 替换为 externalJson.papers[X],
-        // 磁盘上 WriteTrackedJson 写的是 candidate(默认 Resolution=paperTodo),必须立即同步
-        // 写盘才能让用户选 KeepExternal 后磁盘也是 external 版本。否则 1-10 秒 autosave 延迟
-        // 期间,用户查看磁盘会发现"保留传入没生效"。
-        // 仅有运行时微调(占位符归一化、几何调整)且无用户决策变化时,才走 MarkDirty autosave。
-        if (!StateReloadModels.Equivalent(State, pending.Next))
-        {
-            if (pending.Conflicts != null && pending.Conflicts.Count > 0) SaveNow(sync: true);
-            else MarkDirty();
-        }
+        // 同步写盘:ReloadExternalState 写的是 merged candidate(默认 Resolution=paperTodo),
+        // 用户在冲突弹窗里选 KeepExternal 后 State 与 candidate 不一致,必须立即同步写盘
+        // 让磁盘反映用户决策;用户选 KeepMemory 或无冲突时 State == candidate,写盘
+        // 仍然安全(只是覆盖为相同内容)。无条件的 SaveNow(sync: true) 避免 Equivalent
+        // 判断遗漏任何路径导致磁盘停留在 1-10s autosave 之前的旧版本。
+        DataReloadDiagnostics.Log("RELOAD", "CompletePendingDataReload: calling SaveNow(sync: true)");
+        SaveNow(sync: true);
     }
 
     private void RefreshReloadedSettings(AppState before)
@@ -287,32 +305,6 @@ public sealed partial class AppController
         Application.Current.Dispatcher.BeginInvoke(new Action(() =>
         {
             if (!IsExiting) RefreshMcpRuntime();
-        }), DispatcherPriority.ContextIdle);
-    }
-
-    private void QueueDataReloadNotice(DataReloadResult result)
-    {
-        if (result.Outcome is "unchanged" or "busy") return;
-        if (result.Outcome == "applied" && !result.RestartRequired)
-        {
-            _lastDataReloadNotice = null;
-            return;
-        }
-        var key = $"{result.Outcome}|{result.ConflictFile}|{result.Error}|{result.RestartRequired}";
-        if (key == _lastDataReloadNotice) return;
-        _lastDataReloadNotice = key;
-        Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (IsExiting) return;
-            var message = result.Outcome == "conflict"
-                ? Strings.Format("DataReloadConflict", result.ConflictCount, result.ConflictFile ?? "", result.ConflictDiffFile ?? "")
-                : result.Outcome == "applied"
-                    ? Strings.Get("DataReloadRestart")
-                    : Strings.Format("DataReloadFailed", result.Error ?? result.Outcome);
-            if (result.Outcome == "conflict" && result.RestartRequired)
-                message += Environment.NewLine + Strings.Get("DataReloadRestart");
-            MessageBox.Show(message, Strings.Get("DataReloadTitle"), MessageBoxButton.OK,
-                result.Outcome is "failed" or "invalid" ? MessageBoxImage.Warning : MessageBoxImage.Information);
         }), DispatcherPriority.ContextIdle);
     }
 
@@ -372,6 +364,9 @@ public sealed partial class AppController
         var owner = SelectDialogOwner();
         var paperChoices = new Dictionary<string, PaperConflictChoice>(StringComparer.Ordinal);
         var leafChoices = new Dictionary<string, ConflictChoice>(StringComparer.Ordinal);
+        // UnknownBaselineBucket(path=="$")的 KeepExternal 不能走 leaf 合并:整状态覆盖
+        // 通过返回反序列化 externalJson 让 StateReloadModels.Apply 接管身份保留的字段级替换。
+        var wholeExternalReplace = false;
 
         foreach (var bucket in buckets)
         {
@@ -385,14 +380,23 @@ public sealed partial class AppController
                     break;
                 }
 
-                case OrderBucket orderBucket:
                 case UnknownBaselineBucket unknownBucket:
+                {
+                    // 整状态冲突只可能来自 disk 上的整文件差异,用户选 KeepExternal 时
+                    // 必须用整 external 替换 next,不要把 "$" 灌进 leafChoices。
+                    // KeepMemory 走既有默认分支(pending.Next 反映 memory),磁盘照常
+                    // 由 SaveNow(sync:true) 同步。
+                    if (InvokeLeafDialog(owner, unknownBucket.Conflict) == ConflictChoice.KeepExternal)
+                        wholeExternalReplace = true;
+                    break;
+                }
+
+                case OrderBucket orderBucket:
                 case SingleLeafBucket singleBucket:
                 {
                     var leaf = bucket switch
                     {
                         OrderBucket o => o.Conflict,
-                        UnknownBaselineBucket u => u.Conflict,
                         SingleLeafBucket s => s.Conflict,
                         _ => null,
                     };
@@ -403,6 +407,16 @@ public sealed partial class AppController
                     break;
                 }
             }
+        }
+
+        if (wholeExternalReplace && pending.ExternalJson != null)
+        {
+            // 直接反序列化 externalJson 到新 AppState;调用方的 StateReloadModels.Apply
+            // 会按字段级把 external 复制到现有 State,自然处理"外部独有 paper 增 / 共有
+            // paper 字段覆盖 / 内部独有 paper 丢弃",PaperData 引用身份不变。
+            return JsonSerializer.Deserialize<AppState>(
+                pending.ExternalJson.ToJsonString(StateStore.JsonOptions),
+                StateStore.JsonOptions)!;
         }
 
         var withLeafApplied = leafChoices.Count == 0
@@ -450,9 +464,10 @@ public sealed partial class AppController
         if (!_store.HasExternalStateChange()) return false;
         try
         {
-            var path = _store.SavePendingExitRecovery(State);
-            MessageBox.Show(Strings.Format("DataReloadExitRecovery", Path.GetFileName(path)),
-                Strings.Get("DataReloadTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            // 旁路恢复文件已落盘;恢复路径无法用 "PaperTodo 数据重载" 标题通知用户,
+            // 因此 SaveForNormalShutdown 不再弹窗。其他退出失败对话框 (上方 catch 注释)
+            // 仍按原状负责告知用户保存失败本身。
+            _store.SavePendingExitRecovery(State);
             return true;
         }
         catch { return false; } // existing exit failure dialog handles inability to preserve data
