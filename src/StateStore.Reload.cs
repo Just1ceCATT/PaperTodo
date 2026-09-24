@@ -22,7 +22,6 @@ public sealed partial class StateStore
     private int _reloadHistoryBytes;
     private bool _reloadTracking;
     private byte[]? _reloadAcceptedBytes;
-    private JsonObject? _reloadLoadedState;
     private string? _reloadRevision;
 
     private static string DecodeStateBytes(byte[] bytes)
@@ -35,7 +34,6 @@ public sealed partial class StateStore
     private void RememberLoadedReloadState(AppState state, byte[]? primaryBytes, string? sourceJson)
     {
         _reloadAcceptedBytes = primaryBytes;
-        _reloadLoadedState = JsonSerializer.SerializeToNode(state, JsonOptions)!.AsObject();
         // This optional extension must not tighten the existing startup recovery protocol.
         // Strict metadata checks apply to live imports, not an otherwise valid startup file.
         _reloadRevision = null;
@@ -52,9 +50,8 @@ public sealed partial class StateStore
         try
         {
             if (_reloadTracking) return;
-            _reloadLoadedState ??= JsonSerializer.SerializeToNode(state, JsonOptions)!.AsObject();
-            RememberReloadVersion(_reloadRevision ?? "", _reloadLoadedState);
-            _reloadLoadedState = null;
+            var loadedState = JsonSerializer.SerializeToNode(state, JsonOptions)!.AsObject();
+            RememberReloadVersion(_reloadRevision ?? "", loadedState);
             _reloadTracking = true;
         }
         finally { _writeLock.Release(); }
@@ -128,7 +125,26 @@ public sealed partial class StateStore
 
     private void WriteTrackedJson(string json, byte[]? expected)
     {
-        RequireDiskVersion(expected);
+        // 自愈:SaveNow 在 CompletePendingDataReload 末尾触达这里时,_reloadAcceptedBytes 可能
+        // 已经被 ReloadExternalState 写盘后的另一轮(autosave / 用户再编辑)Fsw 漂离 disk,
+        // 但 disk 内容等同于 caller 想写的内容(仅 $paperTodoRevision 不同)。这种情况下
+        // disk 已经是要写的内容,无需再写。把"FSW 写盘 _reloadAcceptedBytes 还没更新就被
+        // SaveNow 看到"的 race window 关掉;真正的外部变更仍上抛 ExternalStatePendingException,
+        // 由 HandleSaveFailure 显示给用户。
+        if (!DiskMatches(expected))
+        {
+            var selfHeal = DiskMatchesContent(json);
+            DataReloadDiagnostics.Log("WRITE",
+                $"WriteTrackedJson disk bytes != _reloadAcceptedBytes ({expected?.Length ?? 0}); DiskMatchesContent={selfHeal}");
+            if (selfHeal) return;
+            DataReloadDiagnostics.Log("WRITE",
+                $"WriteTrackedJson throwing ExternalStatePendingException (disk content differs from desired)");
+            RequireDiskVersion(expected);
+        }
+        else
+        {
+            DataReloadDiagnostics.Log("WRITE", "WriteTrackedJson disk matches expected, proceeding");
+        }
         var state = ParseObject(json);
         state.Remove(ReloadRevisionProperty);
         var revision = Guid.NewGuid().ToString("N");
@@ -139,6 +155,35 @@ public sealed partial class StateStore
         _reloadAcceptedBytes = bytes;
         _reloadRevision = revision;
         RememberReloadVersion(revision, state);
+        DataReloadDiagnostics.Log("WRITE",
+            $"WriteTrackedJson wrote {bytes.Length} bytes revision={revision}");
+    }
+
+    /// <summary>
+    /// 当前 disk 内容(忽略 $paperTodoRevision)是否等同于 caller 想写的 json 序列化内容。
+    /// 两者都来自内部 SaveNow 链路,System.Text.Json.Nodes 的 JsonObject 保留属性插入顺序,
+    /// 所以规范化后字符串比对即可。等价意味着 disk 已经是 caller 想写的内容,无需再写一次。
+    /// </summary>
+    private bool DiskMatchesContent(string desiredJson)
+    {
+        byte[]? diskBytes;
+        try { diskBytes = ReadPrimaryBytes(); }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        if (diskBytes == null) return false;
+        try
+        {
+            var diskText = DecodeStateBytes(diskBytes);
+            var diskState = ParseObject(diskText);
+            diskState.Remove(ReloadRevisionProperty);
+            var desiredState = ParseObject(desiredJson);
+            desiredState.Remove(ReloadRevisionProperty);
+            return diskState.ToJsonString(JsonOptions) == desiredState.ToJsonString(JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or DecoderFallbackException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -157,6 +202,8 @@ public sealed partial class StateStore
                 return new(null, new() { Outcome = "busy", Revision = _reloadRevision }, null, null);
 
             var bytes = ReadPrimaryBytes();
+            DataReloadDiagnostics.Log("RELOAD",
+                $"ReloadExternalState version={version} diskBytes={bytes?.Length ?? -1} acceptedBytes={_reloadAcceptedBytes?.Length ?? -1}");
             if (bytes == null)
                 return new(null, new() { Outcome = "invalid", Error = "data.json is missing; the running state was not replaced." }, null, null);
             if (_reloadAcceptedBytes != null && bytes.AsSpan().SequenceEqual(_reloadAcceptedBytes))
