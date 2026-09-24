@@ -18,18 +18,25 @@ public sealed partial class AppController
         IReadOnlyList<StateMergeConflict>? Conflicts,
         JsonObject? ExternalJson);
 
+    /// <summary>
+    /// data.json 热重载状态机的阶段。<c>Idle</c> 之外任何值都视为"正在 reload",
+    /// <c>AwaitingApply</c> 与 <c>Applying</c> 期间还会抑制编辑器提交(避免覆盖刚合并的内存)。
+    /// </summary>
+    private enum ReloadPhase { Idle, Evaluating, AwaitingApply, Applying }
+
     private FileSystemWatcher? _dataWatcher;
     private DispatcherTimer? _dataReloadTimer;
     private bool _dataReloadReady;
-    private bool _dataReloadEvaluating;
-    private bool _applyingDataReload;
+    private ReloadPhase _reloadPhase = ReloadPhase.Idle;
     private int _dataReloadNotificationPosted;
     private PendingDataReload? _pendingDataReload;
     private DateTimeOffset? _lastDataReloadAt;
     private DataReloadResult? _lastDataReloadResult;
 
-    internal bool IsDataReloading => _dataReloadEvaluating || _applyingDataReload || _pendingDataReload != null;
-    internal bool SuppressDataReloadEditorCommit => _applyingDataReload || _pendingDataReload != null;
+    internal bool IsDataReloading =>
+        _reloadPhase != ReloadPhase.Idle || _pendingDataReload != null;
+    internal bool SuppressDataReloadEditorCommit =>
+        _reloadPhase == ReloadPhase.Applying || _pendingDataReload != null;
 
     private void InitializeDataReload()
     {
@@ -135,7 +142,7 @@ public sealed partial class AppController
         if (!_dataReloadReady || IsDataReloading || Mouse.Captured != null || HasDeepCapsuleReorderDragInProgress())
             return new() { Outcome = "busy" };
 
-        _dataReloadEvaluating = true;
+        _reloadPhase = ReloadPhase.Evaluating;
         _lastDataReloadAt = DateTimeOffset.UtcNow;
         try
         {
@@ -173,16 +180,16 @@ public sealed partial class AppController
             _lastDataReloadResult = result;
             return result;
         }
-        finally { _dataReloadEvaluating = false; }
+        finally { if (_reloadPhase == ReloadPhase.Evaluating) _reloadPhase = ReloadPhase.Idle; }
     }
 
     private void CompletePendingDataReload()
     {
         var pending = _pendingDataReload;
-        if (pending == null || _applyingDataReload || IsExiting) return;
+        if (pending == null || _reloadPhase == ReloadPhase.Applying || IsExiting) return;
         DataReloadDiagnostics.Log("RELOAD",
             $"CompletePendingDataReload start: conflicts={(pending.Conflicts?.Count ?? 0)}");
-        _applyingDataReload = true;
+        _reloadPhase = ReloadPhase.Applying;
         var suppressDirty = _suppressDirty;
         _suppressDirty = true;
         _trayRefreshSuppressionDepth++;
@@ -259,7 +266,7 @@ public sealed partial class AppController
             _trayRefreshSuppressionDepth--;
             _suppressDirty = suppressDirty;
             _pendingDataReload = null;
-            _applyingDataReload = false;
+            _reloadPhase = ReloadPhase.Idle;
             events.Dispose();
         }
         RefreshTrayMenu();
