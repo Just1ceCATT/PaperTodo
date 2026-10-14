@@ -196,7 +196,6 @@ public sealed partial class AppController
         var events = SuppressPaperPluginEventScans();
         try
         {
-            CancelStartupDisplayRestore();
             _paperSurfaceRestoreGeneration++;
             _startupShellPrewarmGeneration++;
             var oldPapers = pending.Before.Papers.ToDictionary(p => p.Id, StringComparer.Ordinal);

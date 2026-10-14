@@ -4210,7 +4210,6 @@ public sealed partial class AppController : IDisposable
     {
         TryExitCleanup(CancelMasterCapsuleQueueTransfers);
         StopDataReloadWatcher();
-        CancelStartupDisplayRestore();
         _pluginStartupPaperGeneration++;
         StopStateBackupPolicy();
         MarkdownEdgePreviewPreload.For(Application.Current.Dispatcher).Clear();
