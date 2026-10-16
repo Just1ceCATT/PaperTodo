@@ -66,6 +66,7 @@
 | D-055 | Aero 不采用 ACCENT_ENABLE_BLURBEHIND 原生模糊 | Rejected | 主题 / Window integration |
 | D-056 | 精确终帧与主胶囊纯视觉输入隔离 | Accepted | Edge handoff / input |
 | D-057 | DWM 桌面截图退出 CI 自动验收 | Accepted | 测试 / Window integration |
+| D-058 | 自由队列以队列实例 key 扩展 D-006 的身份元组 | Accepted | Edge capsule / input |
 
 ## 维护规则
 
@@ -240,6 +241,8 @@ Edge capsule 同时存在单纸片状态与跨纸片会话。若 `PaperWindow`�
 **Status:** Accepted
 
 ### Decision
+
+队列身份元组已在 [D-058](#d-058--自由队列以队列实例-key-扩展-d-006-的身份元组2026-10-16) 扩展为 `(monitor, edge, instanceId)`；本条的双 authority 划分与不分页约束均不变。
 
 - 队列 index / master offset / slot count 只由 `EdgeCapsuleQueueCoordinator` 计算。
 - monitor/edge/DIP 到物理 `DeviceScreenRect` 的 docked geometry 只由 `EdgeCapsuleGeometry` 计算。
@@ -1796,3 +1799,42 @@ PR #319 的初版把主胶囊完整材质收展后的卡死解释为终点迟到
 - `.github/workflows/pull-request-build.yml`：仍执行材质行为检查，但不再输出桌面截图 artifact。
 - `tests/PaperTodo.MicaChecks/Program.cs` 与 `MaterialStudyChecks.cs`：保留确定性渲染与运行时检查；历史屏幕采样源文件删除。
 - `doc/experiments/pr227-drag-followup-20260922.md`：基线、故障证据与失败补绘实验。
+
+## D-058 — 自由队列以「队列实例 key」扩展 D-006 的身份元组（2026-10-16）
+
+**Status:** Accepted
+
+### Context
+
+D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一条队列，队列成员的位置完全由 `State.Papers` 的顺序经 `EdgeCapsuleLayout.TopForIndex` 算出。用户在关闭主胶囊的使用方式下无法摆放胶囊：拖动只能在一个等距栈内换索引，队列整体也只能由主胶囊拖动起点。
+
+需求是自由摆放：拖动单个胶囊可停在同一竖直线的任意高度并自成队列，靠近其他队列则合并，拖远则脱离，同一条边可并存多条队列，`Ctrl`+拖任一成员可整队搬移。
+
+### Decision
+
+- 队列身份扩展为 `(monitor, edge, instanceId)`，`instanceId` 存于 `PaperData.CapsuleQueueId`。key 形态为 `"{monitor}|{side}#{instanceId}"`；**`instanceId` 为空时 key 与 D-006 时代逐字节相同**，这是旧数据零迁移、旧断言不变、无需版本号或迁移脚本的唯一依据。
+- **D-006 的双 authority 划分不变且被强化**：`EdgeCapsuleQueueCoordinator` 仍独占 index / visualOffset / slotCount（只是改为按实例 key 分组），`EdgeCapsuleGeometry` 仍独占 docked 物理像素。每条实例用自己的 start margin 调用同一个 `EdgeCapsuleLayout.TopForIndex`，即「同一公式、不同输入」。`EdgeCapsuleQueueCoordinator.Build` 的签名与职责完全未改。
+- 队列起始 Y **不新增字典**，只扩展 `AppState.DeepCapsuleQueueStartTopMargins` 的 key 形态。该字典已是唯一的持久化队列坐标 authority；另起一个字典会立刻产生「哪个赢」的问题，也违反 AGENTS.md「不建立第二套主状态写入」。
+- **自由队列与主胶囊互斥**，开启任一方强制关闭另一方。一条边存在多条队列时，slot 0 的主胶囊属于哪条队列没有定义；保留互斥让 master / collapse-all / 队列合成代理整块路径保持 inert，避免第二套 owner。互斥写进 catalog setter 与加载归一化，因此 UI 路径与公开设置 API 不可能不一致。
+- 磁吸判定是**无 WPF 依赖的纯函数** `EdgeCapsuleQueueMagnet`，防抖用 Schmitt trigger（进 18 DIP / 出 32 DIP）内生于纯函数本身，而非时间状态或帧计数 —— 因此完全可单测，也不会因掉帧抖动。
+- `Ctrl` 整队拖动的悬浮代表物是**单颗胶囊**，不是 N 个：既有 D-011 规定进程级只维护一个 pooled drag HWND。
+- `Ctrl` 修饰键取自 `WM_LBUTTONDOWN` 的原生 `wParam`，在 pointer-down 瞬间 latch，整个手势期间不再重读；`Keyboard.Modifiers` 仅作 host hook 未命中时的兜底，因为胶囊取得指针后它不再可靠。
+
+### Why
+
+把「多队列」做成运行时映射而不是持久化的实例身份，会迫使同一份队列起始高度存在两个 authority；扩展既有 key 形态是唯一能同时满足 AGENTS.md 与 D-006 的做法。判定逻辑放进纯函数而非拖拽回调，是为了让进入/死区/退出这三种行为可以被 30 行断言覆盖，而不必驱动真实窗口。
+
+### Rejected / Do not reintroduce
+
+- 不为每条队列实例新增独立的 top-dips 字典。
+- 不让主胶囊与自由队列共存。
+- 不为整队拖动同时租用多个 drag HWND。
+- 不在关闭自由队列时清空队列布局记忆（布局是用户布局，不是运行时状态）。
+- 不在 `StateStore` 里先归一化 side 再剥离实例后缀 —— 那样 `"right#q1"` 会被 `DeepCapsuleSides` 折叠成 `"right"`，两条队列静默塌缩且不报错。
+
+### Current code
+
+- `src/EdgeCapsuleQueueIds.cs`：实例 id 的归一化、生成与 key 编解码。
+- `src/EdgeCapsuleQueueMagnet.cs`：合并／重排／脱离判定的唯一 authority。
+- `src/AppController.EdgeCapsuleFreeQueues.cs`、`src/AppController.EdgeCapsuleQueueTransfer.cs`：把判定结果落到 `AppState`。
+- `src/PaperWindow.EdgeCapsuleInteraction.cs`：latch 修饰键、整队事务的提交与回滚。
