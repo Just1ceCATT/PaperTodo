@@ -1841,6 +1841,7 @@ D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一�
 - **判定**：`EdgeCapsuleQueueMagnet` 纯函数，拖拽中以 32 ms 间隔评估，并把上一帧的 `TargetQueueKey` 作为 `HeldQueueKey` 回传。提交时显式清空 hold —— 指针已释放，继续沿用退出阈值已无意义。
 - **被拖实体**：判定与让位都以 `carried`（本次拖拽带走的胶囊列表）为准。单胶囊拖拽是一个元素的列表，`Ctrl` 整队搬移是整条队列的列表——目标队列因此按 `carried.Count` 开位，而不是固定开一个。
 - **让位**：源队列补位与目标队列开位，都通过 `EdgeCapsuleQueueCoordinator` 重算后**直连下发** `PreviewDeepCapsulePlacement`。拖拽期必须直连，不能改走 `ArrangeDeepCapsules`：arrange gate 会把手势期间的重排延迟到结束，那正是本功能要消除的僵硬。
+- **迷你视图避让是边级的**：避让量是纯相对位移（session 端以 `VisualIndex * slotHeight` 为基准、丢弃锚点，布局端同样以 `TopForIndex(...)` 为基准丢弃锚点，两端抵消），因此同一个位移对任意队列成立。同一条 monitor+edge 上的所有队列都要为展开中的卡片让位——自由队列让一条边承载多条独立堆叠，只在 owner 队列内让位会导致两个队列的胶囊重叠。
 - **标记**：目标队列由一个独立的 accent 描边窗口标出。无法合并时用「没有高亮框、没有让位」表达，不再另加否定动画。
 
 **浮空阶段同样要让位。** 拖拽一旦横向位移超过 `CrossQueueDragUnlockDistance` 或跨显示器，就进入 Win32 模态移动循环，此时 WPF 不再收到指针事件。模态循环内没有 docked 槽位可预览，但**源队列必须收拢**——让队列留一个永久空洞，正是「拖出去了、同伴不动」观感的来源。反馈改由一个 `DispatcherTimer` 轮询光标驱动，模态循环仍会泵 Dispatcher，因此计时器照常触发。
@@ -1857,6 +1858,8 @@ D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一�
 - 不抢 `SetPluginContent` 承载反馈标记（与插件内容冲突）。
 - 不为「高亮」给 `EdgeCapsulePresentationFrame` 加字段：`Surface`、`OutlineVisible`、`ContentOpacity` 三个已够，加字段要连带改 `ToFrame()` / `Hidden` / 所有构造点。
 - 不把 hover 预览的 `_edgeCapsulePreviewSession` 改成按队列的字典 —— 那是全应用单 owner 设计，让位动画不需要 session。
+- 不把 `EdgeCapsulePreviewLayoutSession.QueuePaperIds` 泛化为跨队列集合：它是 hover 走廊拓扑与 transfer 目标的权威输入，泛化后队列之间的**间隙**会被判定为「指针仍在走廊内」，存活区被人为放大导致预览永不关闭，且同边纵向浏览会被误判为 transfer。边级避让另用 `EdgePaperIds` 表达。
+- 不在迷你视图展开期间改写队列起始高度记忆：那是持久化 authority，会被拖拽提交路径覆盖或误存。
 - 不为整队列搬移另写一套磁吸判定：`Ctrl` 搬移走的是同一个 `EdgeCapsuleQueueMagnet`，只是被拖实体从一颗变成 N 颗。
 - 不把整队搬移的源队列列为磁吸候选：它正是正在被带走的东西，合并进自己没有意义。
 - 不在浮空阶段跳过源队列让位（队列留空洞，观感与贴边重排完全不同）。
