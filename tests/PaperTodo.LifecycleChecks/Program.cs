@@ -11,7 +11,8 @@ internal static class Program
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
     private const string FixtureMarker = ".papertodo-lifecycle-fixture";
-    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "edge-expand-foreground", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history"];
+    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "edge-expand-foreground", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history",
+        "free-queue-preview-restore"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -159,6 +160,19 @@ internal static class Program
                 IsVisible = true, IsCollapsed = true, X = area.Left + 60, Y = area.Top + 60,
                 Width = 300, Height = 240, CapsuleSide = DeepCapsuleSides.Right
             });
+        if (name == "free-queue-preview-restore")
+        {
+            // 同一右侧边上的三条自由队列：qa = [0, 1]，qb = [2, 3]，qc = [4]。
+            state.UseCapsuleFreeQueues = true;
+            state.UseCapsuleCollapseAll = false;
+            state.Papers[0].CapsuleQueueId = "qa";
+            state.Papers[1].CapsuleQueueId = "qa";
+            state.Papers[2].CapsuleQueueId = "qb";
+            state.Papers[3].CapsuleQueueId = "qb";
+            state.Papers[4].CapsuleQueueId = "qc";
+            state.DeepCapsuleQueueStartTopMargins["|right#qb"] = 320;
+            state.DeepCapsuleQueueStartTopMargins["|right#qc"] = 450;
+        }
         if (name.StartsWith("master-queue-merge"))
         {
             state.Papers[2].CapsuleSide = DeepCapsuleSides.Left;
@@ -198,6 +212,11 @@ internal static class Program
             await controller.StartAsync(createDefaultPaper: false);
             await Dispatcher.CurrentDispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
             var visible = windows.Values.Count(window => window.HasVisibleSurface);
+            if (name == "free-queue-preview-restore")
+            {
+                await EdgeCapsuleQueuePreviewChecks.Run(controller, windows);
+                return;
+            }
             if (name == "edge-expand-foreground")
             {
                 await EdgeExpandForegroundChecks.Run(controller, windows);
