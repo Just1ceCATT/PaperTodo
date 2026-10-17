@@ -1824,12 +1824,43 @@ D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一�
 
 把「多队列」做成运行时映射而不是持久化的实例身份，会迫使同一份队列起始高度存在两个 authority；扩展既有 key 形态是唯一能同时满足 AGENTS.md 与 D-006 的做法。判定逻辑放进纯函数而非拖拽回调，是为了让进入/死区/退出这三种行为可以被 30 行断言覆盖，而不必驱动真实窗口。
 
+### 拖拽期反馈契约
+
+自由队列的拖拽反馈分三层，判定与渲染严格分离：
+
+- **判定**：`EdgeCapsuleQueueMagnet` 纯函数，拖拽中以 32ms 间隔评估，并把上一帧的 `TargetQueueKey` 作为 `HeldQueueKey` 回传。提交时显式清空 hold——指针已释放，继续沿用退出阈值已无意义。
+- **让位**：队列失去成员时其余成员补位、队列获得成员时腾出空隙，两者都通过 `EdgeCapsuleQueueCoordinator` 重算后**直连下发** `PreviewDeepCapsulePlacement`。拖拽期必须直连，不能改走 `ArrangeDeepCapsules`：arrange gate 会把手势期间的重排延迟到结束，那正是本功能要消除的僵硬。
+- **标记**：目标队列由一个独立的 accent 描边窗口标出；无法合并时对被拖胶囊自身做一次危险色闪烁，不带弹跳——弹跳语义是「你得到了什么」，而拒绝不是获得。
+
+让位的平滑来自一个看似低效的现状：`BeginEdgeCapsuleVisualTransaction` 全库只有三个调用点，重排路径一个都没有，因此每个 peer 各自起 200ms 时钟并每帧从 `AppliedPresentation` 重新起跳。这个「每帧 retarget」正是手感来源，不要为了省一次事务就 batch 化。
+
+### 拖拽期反馈契约
+
+自由队列的拖拽反馈分三层，判定与渲染严格分离：
+
+- **判定**：`EdgeCapsuleQueueMagnet` 纯函数，拖拽中以 32 ms 间隔评估，并把上一帧的 `TargetQueueKey` 作为 `HeldQueueKey` 回传。提交时显式清空 hold —— 指针已释放，继续沿用退出阈值已无意义。
+- **让位**：源队列补位与目标队列开位，都通过 `EdgeCapsuleQueueCoordinator` 重算后**直连下发** `PreviewDeepCapsulePlacement`。拖拽期必须直连，不能改走 `ArrangeDeepCapsules`：arrange gate 会把手势期间的重排延迟到结束，那正是本功能要消除的僵硬。
+- **标记**：目标队列由一个独立的 accent 描边窗口标出。无法合并时用「没有高亮框、没有让位」表达，不再另加否定动画。
+
+**浮空阶段同样要让位。** 拖拽一旦横向位移超过 `CrossQueueDragUnlockDistance` 或跨显示器，就进入 Win32 模态移动循环，此时 WPF 不再收到指针事件。模态循环内没有 docked 槽位可预览，但**源队列必须收拢**——让队列留一个永久空洞，正是「拖出去了、同伴不动」观感的来源。反馈改由一个 `DispatcherTimer` 轮询光标驱动，模态循环仍会泵 Dispatcher，因此计时器照常触发。
+
+让位的平滑来自一个看似低效的现状：`BeginEdgeCapsuleVisualTransaction` 全库只有三个调用点，重排路径一个都没有，因此每个 peer 各自起 200 ms 时钟并每帧从 `AppliedPresentation` 重新起跳。这个「每帧 retarget」正是手感来源，不要为了省一次事务就 batch 化。连续感来自**目标队列随插入位变化反复重下发**，而不是让源队列反复重发——源队列的目标位置从头到尾不变，重复下发只是空转。
+
 ### Rejected / Do not reintroduce
 
 - 不为每条队列实例新增独立的 top-dips 字典。
 - 不让主胶囊与自由队列共存。
 - 不为整队拖动同时租用多个 drag HWND。
 - 不在关闭自由队列时清空队列布局记忆（布局是用户布局，不是运行时状态）。
+- 不为拖拽反馈改 `HostBounds`（撞队列合成代理的 `unstable-host-capacity`，整代 reject）。
+- 不抢 `SetPluginContent` 承载反馈标记（与插件内容冲突）。
+- 不为「高亮」给 `EdgeCapsulePresentationFrame` 加字段：`Surface`、`OutlineVisible`、`ContentOpacity` 三个已够，加字段要连带改 `ToFrame()` / `Hidden` / 所有构造点。
+- 不把 hover 预览的 `_edgeCapsulePreviewSession` 改成按队列的字典 —— 那是全应用单 owner 设计，让位动画不需要 session。
+- 不在浮空阶段跳过源队列让位（队列留空洞，观感与贴边重排完全不同）。
+- 不为拖拽反馈改 `HostBounds`（撞队列合成代理的 `unstable-host-capacity`，整代 reject）。
+- 不抢 `SetPluginContent` 承载反馈标记（与插件内容冲突）。
+- 不为「高亮」给 `EdgeCapsulePresentationFrame` 加字段：`Surface`、`OutlineVisible`、`ContentOpacity` 三个已够。
+- 不把 hover 预览的 `_edgeCapsulePreviewSession` 改成按队列的字典 —— 那是全应用单 owner 设计，让位动画不需要 session。
 - 不在 `StateStore` 里先归一化 side 再剥离实例后缀 —— 那样 `"right#q1"` 会被 `DeepCapsuleSides` 折叠成 `"right"`，两条队列静默塌缩且不报错。
 
 ### Current code
@@ -1837,4 +1868,5 @@ D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一�
 - `src/EdgeCapsuleQueueIds.cs`：实例 id 的归一化、生成与 key 编解码。
 - `src/EdgeCapsuleQueueMagnet.cs`：合并／重排／脱离判定的唯一 authority。
 - `src/AppController.EdgeCapsuleFreeQueues.cs`、`src/AppController.EdgeCapsuleQueueTransfer.cs`：把判定结果落到 `AppState`。
-- `src/PaperWindow.EdgeCapsuleInteraction.cs`：latch 修饰键、整队事务的提交与回滚。
+- `src/PaperWindow.EdgeCapsuleInteraction.cs`：latch 修饰键、拖拽期 32 ms 判定与节流、模态循环内的光标轮询、整队事务的提交与回滚。
+- `src/AppController.EdgeCapsuleQueueDropTarget.cs`、`src/EdgeCapsuleQueueDropTargetOutline.cs`：目标队列的描边标记。
