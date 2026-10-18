@@ -597,6 +597,10 @@ public sealed partial class PaperWindow
     private string _deepCapsuleQueuePreviewKey = "";
     private int _deepCapsuleQueuePreviewIndex = -1;
 
+    // 贴边同队列重排的预览只改本队内部顺序；提交时必须走纯重排，不能触发整边求解器。
+    // 浮空拖回源队列同样会把 preview key 钉成源队列，因此不能只靠 key 区分。
+    private bool _deepCapsuleSameQueueReorderPreviewed;
+
     /// <summary>
     /// Sample the cursor on a timer while the native caption loop owns the drag.
     ///
@@ -708,6 +712,7 @@ public sealed partial class PaperWindow
         _deepCapsuleQueuePreviewIndex = -1;
         _deepCapsuleVacatedQueueKey = "";
         _deepCapsuleQueuePreviewTimestamp = 0;
+        _deepCapsuleSameQueueReorderPreviewed = false;
     }
 
     /// <summary>
@@ -726,6 +731,7 @@ public sealed partial class PaperWindow
 
         _deepCapsuleQueuePreviewKey = "";
         _deepCapsuleQueuePreviewIndex = -1;
+        _deepCapsuleSameQueueReorderPreviewed = false;
 
         if (!string.Equals(
                 targetKey,
@@ -843,6 +849,7 @@ public sealed partial class PaperWindow
             : [_paper];
         if (carried.Count == 0)
         {
+            _deepCapsuleSameQueueReorderPreviewed = false;
             return;
         }
 
@@ -873,6 +880,9 @@ public sealed partial class PaperWindow
             crossQueue || sameQueueFloatingPreview,
             floatingPhase,
             transfer != null);
+
+        // 本帧默认不是纯重排；只有 SameQueueReorder 分支成功执行后才置 true。
+        _deepCapsuleSameQueueReorderPreviewed = false;
 
         if (sameQueueFloatingPreview)
         {
@@ -1008,6 +1018,7 @@ public sealed partial class PaperWindow
         // 每帧都要重设：RestoreDeepCapsuleQueuePreviewTarget 会在本分支入口清空这两个字段。
         _deepCapsuleQueuePreviewKey = sourceQueueKey;
         _deepCapsuleQueuePreviewIndex = index;
+        _deepCapsuleSameQueueReorderPreviewed = true;
     }
 
     private void PreviewDeepCapsuleReorderForCurrentPosition()
@@ -1293,7 +1304,8 @@ public sealed partial class PaperWindow
                             _paper,
                             anchor,
                             _deepCapsuleQueuePreviewKey,
-                            _deepCapsuleQueuePreviewIndex);
+                            _deepCapsuleQueuePreviewIndex,
+                            _deepCapsuleSameQueueReorderPreviewed);
                     }
 
                     return;
