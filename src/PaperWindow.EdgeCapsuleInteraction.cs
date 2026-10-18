@@ -426,7 +426,9 @@ public sealed partial class PaperWindow
             _controller.ScheduleDisplayMetricsRefresh();
             return;
         }
-        if (!IsDeepCapsuleFloatingReordering)
+        // FloatingTransfer 阶段宿主已创建、但手势尚未进入 FloatingReordering；此时异常关闭
+        // 同样必须取消，否则 arrange gate、隐藏成员和鼠标光标都会永久卡住。
+        if (!IsDeepCapsuleReordering)
         {
             return;
         }
@@ -601,6 +603,10 @@ public sealed partial class PaperWindow
     // 浮空拖回源队列同样会把 preview key 钉成源队列，因此不能只靠 key 区分。
     private bool _deepCapsuleSameQueueReorderPreviewed;
 
+    // 候选缓存版本。目标 key/index 不变但候选输入变化时，必须重新生成拖放计划，
+    // 否则预览/描边会停留在旧几何，而提交会重新求解。
+    private int _deepCapsuleQueuePlanInputVersion = -1;
+
     /// <summary>
     /// Sample the cursor on a timer while the native caption loop owns the drag.
     ///
@@ -713,6 +719,7 @@ public sealed partial class PaperWindow
         _deepCapsuleVacatedQueueKey = "";
         _deepCapsuleQueuePreviewTimestamp = 0;
         _deepCapsuleSameQueueReorderPreviewed = false;
+        _deepCapsuleQueuePlanInputVersion = -1;
     }
 
     /// <summary>
@@ -739,6 +746,12 @@ public sealed partial class PaperWindow
                 StringComparison.Ordinal))
         {
             _controller.RestoreDeepCapsuleQueuePreview(targetKey);
+        }
+        else
+        {
+            // 目标是源队列时不能恢复源队列成员（会把空槽重新撑开），但求解器联动推开的
+            // 同边邻居必须恢复，否则离开预览后会留下瞬态位移。
+            _controller.RestoreDeepCapsuleQueueDragAvoidance();
         }
     }
 
@@ -944,7 +957,10 @@ public sealed partial class PaperWindow
             RestoreDeepCapsuleQueuePreviewTarget();
         }
 
-        var sameSlot = !targetChanged && index == _deepCapsuleQueuePreviewIndex;
+        var inputVersion = _controller.MagnetCandidateBuildCount;
+        var sameSlot = !targetChanged &&
+            index == _deepCapsuleQueuePreviewIndex &&
+            inputVersion == _deepCapsuleQueuePlanInputVersion;
         if (!sameSlot)
         {
             var feasible = _controller.PreviewDeepCapsuleQueueDrag(
@@ -952,6 +968,7 @@ public sealed partial class PaperWindow
                 plan.TargetQueueKey,
                 index,
                 allowSourceQueueTarget: sameQueueFloatingPreview);
+            _deepCapsuleQueuePlanInputVersion = inputVersion;
             if (!feasible)
             {
                 // 计划不可行：恢复上一帧的目标/邻队展开，源队列保持收拢；
@@ -1113,6 +1130,18 @@ public sealed partial class PaperWindow
                 CancelDeepCapsuleReorderDrag(restoreLayout: true);
                 return;
             }
+
+            // 宿主可能在创建/切换状态的同步调用里被非 owner 关闭；事件处理器会取消手势，
+            // 这里再校验一次，避免继续在已失效的宿主上运行原生拖拽。
+            if (!ReferenceEquals(floatingHost, _deepCapsuleFloatingDragHost) ||
+                !IsDeepCapsuleFloatingReordering)
+            {
+                CancelDeepCapsuleReorderDrag(restoreLayout: true);
+                return;
+            }
+
+            // 已离开墙面，贴边同队列重排预览不再代表当前落点。
+            _deepCapsuleSameQueueReorderPreviewed = false;
             WindowNative.BringToFrontNoActivate(floatingHost);
             // Only now that the floating capsule is on screen may the rest of the queue be hidden;
             // detaching first would leave a frame with nothing drawn at all.
@@ -1305,7 +1334,7 @@ public sealed partial class PaperWindow
                             anchor,
                             _deepCapsuleQueuePreviewKey,
                             _deepCapsuleQueuePreviewIndex,
-                            _deepCapsuleSameQueueReorderPreviewed);
+                            !wasFloatingDrag && _deepCapsuleSameQueueReorderPreviewed);
                     }
 
                     return;
@@ -1314,7 +1343,7 @@ public sealed partial class PaperWindow
                 // 拖拽中自由队列被关闭：先回滚整队事务，再走旧路径，避免 source key 泄漏。
                 if (transfer is { } legacyTransfer)
                 {
-                    _controller.CancelEdgeCapsuleQueueTransfer(legacyTransfer);
+                    _controller.AbandonEdgeCapsuleQueueTransfer(legacyTransfer);
                     transferConsumed = true;
                 }
 
@@ -1406,7 +1435,7 @@ public sealed partial class PaperWindow
         if (_deepCapsuleQueueTransferSnapshot is { } cancelledTransfer)
         {
             _deepCapsuleQueueTransferSnapshot = null;
-            _controller.CancelEdgeCapsuleQueueTransfer(cancelledTransfer);
+            _controller.AbandonEdgeCapsuleQueueTransfer(cancelledTransfer);
         }
 
         var wasReordering = IsDeepCapsuleReordering;
