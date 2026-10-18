@@ -1816,6 +1816,7 @@ D-006 把队列身份定义为 `(monitor, edge)`，因此一条边恒等于一�
 - **D-006 的双 authority 划分不变且被强化**：`EdgeCapsuleQueueCoordinator` 仍独占 index / visualOffset / slotCount（只是改为按实例 key 分组），`EdgeCapsuleGeometry` 仍独占 docked 物理像素。每条实例用自己的 start margin 调用同一个 `EdgeCapsuleLayout.TopForIndex`，即「同一公式、不同输入」。`EdgeCapsuleQueueCoordinator.Build` 的签名与职责完全未改。
 - 队列起始 Y **不新增字典**，只扩展 `AppState.DeepCapsuleQueueStartTopMargins` 的 key 形态。该字典已是唯一的持久化队列坐标 authority；另起一个字典会立刻产生「哪个赢」的问题，也违反 AGENTS.md「不建立第二套主状态写入」。
 - **自由队列与主胶囊互斥**，开启任一方强制关闭另一方。一条边存在多条队列时，slot 0 的主胶囊属于哪条队列没有定义；保留互斥让 master / collapse-all / 队列合成代理整块路径保持 inert，避免第二套 owner。互斥写进 catalog setter 与加载归一化，因此 UI 路径与公开设置 API 不可能不一致。
+- **新建队列与插入共用「不重叠」判据**：磁吸在合法区间内找不到不与现有队列重叠的落点时返回 `None`；提交拒绝落位并保持原布局（单胶囊回原队列，整队恢复快照），不接受重叠落点。
 - 磁吸判定是**无 WPF 依赖的纯函数** `EdgeCapsuleQueueMagnet`，防抖用 Schmitt trigger（进 18 DIP / 出 32 DIP）内生于纯函数本身，而非时间状态或帧计数 —— 因此完全可单测，也不会因掉帧抖动。
 - `Ctrl` 整队拖动的悬浮代表物是**单颗胶囊**，不是 N 个：既有 D-011 规定进程级只维护一个 pooled drag HWND。
 - `Ctrl` 修饰键取自 `WM_LBUTTONDOWN` 的原生 `wParam`，在 pointer-down 瞬间 latch，整个手势期间不再重读；`Keyboard.Modifiers` 仅作 host hook 未命中时的兜底，因为胶囊取得指针后它不再可靠。
