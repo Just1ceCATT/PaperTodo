@@ -13,7 +13,8 @@ internal static class Program
     private const string FixtureMarker = ".papertodo-lifecycle-fixture";
     private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "edge-expand-foreground", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history",
         "free-queue-preview-restore", "free-queue-regressions",
-        "edge-capsule-pending-drag-release", "free-queue-resting-avoidance"];
+        "edge-capsule-pending-drag-release", "free-queue-resting-avoidance",
+        "free-queue-shortcut-targeting"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -161,7 +162,9 @@ internal static class Program
                 IsVisible = true, IsCollapsed = true, X = area.Left + 60, Y = area.Top + 60,
                 Width = 300, Height = 240, CapsuleSide = DeepCapsuleSides.Right
             });
-        if (name == "free-queue-preview-restore" || name == "free-queue-regressions")
+        if (name == "free-queue-preview-restore" ||
+            name == "free-queue-regressions" ||
+            name == "free-queue-shortcut-targeting")
         {
             // 同一右侧边上的三条自由队列：qa = [0, 1]，qb = [2, 3]，qc = [4]。
             state.UseCapsuleFreeQueues = true;
@@ -244,6 +247,11 @@ internal static class Program
             if (name == "free-queue-resting-avoidance")
             {
                 await EdgeCapsuleRestingLayoutChecks.Run(controller, windows);
+                return;
+            }
+            if (name == "free-queue-shortcut-targeting")
+            {
+                await EdgeCapsuleShortcutChecks.Run(controller, windows);
                 return;
             }
             if (name == "edge-expand-foreground")
