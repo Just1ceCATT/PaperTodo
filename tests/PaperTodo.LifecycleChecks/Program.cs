@@ -14,7 +14,7 @@ internal static class Program
     private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "edge-expand-foreground", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history",
         "free-queue-preview-restore", "free-queue-regressions",
         "edge-capsule-pending-drag-release", "free-queue-resting-avoidance",
-        "free-queue-shortcut-targeting"];
+        "free-queue-shortcut-targeting", "free-queue-bottom-insert"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -190,6 +190,21 @@ internal static class Program
             state.DeepCapsuleQueueStartTopMargins["|" + DeepCapsuleSides.Right + "#qb"] = 60;
             state.DeepCapsuleQueueStartTopMargins["|" + DeepCapsuleSides.Right + "#qc"] = 400;
         }
+        if (name == "free-queue-bottom-insert")
+        {
+            // 源队列三成员；目标队列单成员并贴底（margin 由布局夹到最大值）；
+            // fixture-4 移到左侧，避免成为右侧磁吸候选。
+            state.UseCapsuleFreeQueues = true;
+            state.UseCapsuleCollapseAll = false;
+            state.Papers[0].CapsuleQueueId = "qsrc";
+            state.Papers[1].CapsuleQueueId = "qsrc";
+            state.Papers[2].CapsuleQueueId = "qsrc";
+            state.Papers[3].CapsuleQueueId = "qtgt";
+            state.Papers[4].CapsuleSide = DeepCapsuleSides.Left;
+            state.Papers[4].CapsuleQueueId = "qleft";
+            state.DeepCapsuleQueueStartTopMargins[
+                "|" + DeepCapsuleSides.Right + "#qtgt"] = 100_000;
+        }
         if (name.StartsWith("master-queue-merge"))
         {
             state.Papers[2].CapsuleSide = DeepCapsuleSides.Left;
@@ -252,6 +267,11 @@ internal static class Program
             if (name == "free-queue-shortcut-targeting")
             {
                 await EdgeCapsuleShortcutChecks.Run(controller, windows);
+                return;
+            }
+            if (name == "free-queue-bottom-insert")
+            {
+                await EdgeCapsuleBottomInsertChecks.Run(controller, windows);
                 return;
             }
             if (name == "edge-expand-foreground")
