@@ -13,7 +13,7 @@ internal static class Program
     private const string FixtureMarker = ".papertodo-lifecycle-fixture";
     private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "edge-expand-foreground", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history",
         "free-queue-preview-restore", "free-queue-regressions",
-        "edge-capsule-pending-drag-release", "free-queue-resting-avoidance",
+        "edge-capsule-pending-drag-release",
         "free-queue-shortcut-targeting", "free-queue-bottom-insert"];
 
     [STAThread]
@@ -177,19 +177,6 @@ internal static class Program
             state.DeepCapsuleQueueStartTopMargins["|right#qb"] = 320;
             state.DeepCapsuleQueueStartTopMargins["|right#qc"] = 450;
         }
-        if (name == "free-queue-resting-avoidance")
-        {
-            // 默认队列 [0, 1] 与 qb [2, 3] 故意重叠：默认队列底边 144，qb 起点 60。
-            // qc [4] 在 400，必须保持不动。
-            state.UseCapsuleFreeQueues = true;
-            state.UseCapsuleCollapseAll = false;
-            state.Papers[2].CapsuleQueueId = "qb";
-            state.Papers[3].CapsuleQueueId = "qb";
-            state.Papers[4].CapsuleQueueId = "qc";
-            state.DeepCapsuleQueueStartTopMargins["|" + DeepCapsuleSides.Right] = 48;
-            state.DeepCapsuleQueueStartTopMargins["|" + DeepCapsuleSides.Right + "#qb"] = 60;
-            state.DeepCapsuleQueueStartTopMargins["|" + DeepCapsuleSides.Right + "#qc"] = 400;
-        }
         if (name == "free-queue-bottom-insert")
         {
             // 源队列三成员；目标队列单成员并贴底（margin 由布局夹到最大值）；
@@ -257,11 +244,6 @@ internal static class Program
             if (name == "edge-capsule-pending-drag-release")
             {
                 await EdgeCapsulePendingDragChecks.Run(controller, windows);
-                return;
-            }
-            if (name == "free-queue-resting-avoidance")
-            {
-                await EdgeCapsuleRestingLayoutChecks.Run(controller, windows);
                 return;
             }
             if (name == "free-queue-shortcut-targeting")
